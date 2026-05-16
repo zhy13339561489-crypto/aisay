@@ -187,6 +187,50 @@ flowchart LR
 - DTO 的基础校验只处理格式与必填；唯一性、归属关系、权限控制由后续 Service 和 Security 层承担。
 - Entity 与 DTO 之间的转换将在后续 Service 层实现，必要时可增加专门的 converter/assembler。
 
+## 安全认证模块
+
+Phase 5 新增基于 JWT 的无状态认证体系。登录成功后后端签发 token，前端后续请求通过 `Authorization: Bearer <token>` 携带身份；后端过滤器验证 token 后把用户 ID 写入 Spring Security 上下文。
+
+```mermaid
+sequenceDiagram
+    participant Client as 前端
+    participant AuthApi as UserController
+    participant UserService as UserService
+    participant Jwt as JwtUtil
+    participant Filter as JwtAuthenticationFilter
+    participant ProtectedApi as 受保护接口
+
+    Client->>AuthApi: POST /api/auth/login
+    AuthApi->>UserService: 校验用户名和密码
+    UserService->>Jwt: 生成 JWT
+    Jwt-->>Client: token
+    Client->>Filter: Authorization: Bearer token
+    Filter->>Jwt: 验证并解析 userId
+    Filter->>ProtectedApi: 写入 SecurityContext 后放行
+```
+
+安全配置说明：
+
+- `SecurityConfig` 关闭 CSRF、表单登录和 HTTP Basic，使用无状态会话。
+- `/api/auth/**`、Knife4j/OpenAPI 文档资源和 `/ws/**` 放行。
+- 其他接口默认需要认证。
+- 未认证请求返回 JSON 格式的 `ApiResponse`，HTTP 状态码为 401。
+- `CorsConfig` 允许前端开发地址 `localhost:8080` 和 `127.0.0.1:8080`。
+
+认证业务说明：
+
+- `JwtUtil` 负责 token 签发、验证和解析。
+- `JwtAuthenticationFilter` 负责从请求头解析 Bearer token 并设置认证上下文。
+- `SecurityUtils` 提供 `getCurrentUserId()`，后续业务接口用它获取当前登录用户。
+- `UserServiceImpl` 负责注册、登录、获取和更新用户资料。
+- 密码仅保存 BCrypt 哈希，不在响应 DTO 中返回。
+
+接口边界：
+
+- `POST /api/auth/register` 和 `POST /api/auth/login` 不需要 token。
+- `GET /api/user/profile` 和 `PUT /api/user/profile` 需要有效 token。
+- 当前异常响应将在 Phase 8 的全局异常处理阶段统一收口。
+
 ## 后续演进
 
-Phase 5 到 Phase 8 会在后端现有包结构中继续补齐安全认证、聊天、漫剧、文件与异常处理。Phase 9 之后会在前端现有目录中逐步实现路由、布局、认证、聊天、漫剧和用户中心页面。
+Phase 6 到 Phase 8 会在后端现有包结构中继续补齐聊天、漫剧、文件与异常处理。Phase 9 之后会在前端现有目录中逐步实现路由、布局、认证、聊天、漫剧和用户中心页面。

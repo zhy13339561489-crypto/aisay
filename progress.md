@@ -193,3 +193,80 @@
 
 - DTO 只负责 API 入参与出参承载，不直接依赖 Mapper，也不写业务逻辑。
 - 请求 DTO 当前只包含基础格式校验；用户名/邮箱唯一性、会话归属、故事归属等业务校验会放在后续 Service 层。
+
+## 2026-05-16 Phase 5：后端安全与认证
+
+### Step 5.1 JWT 工具类
+
+- [x] 创建 `utils/JwtUtil.java`。
+- [x] 实现 `generateToken(Long userId, String username)`，JWT 中包含 `userId`、`username`、签发时间和过期时间。
+- [x] 实现 `validateToken(String token)`，非法或过期 token 返回 `false`。
+- [x] 实现 `getUserIdFromToken(String token)`。
+- [x] 实现 `getUsernameFromToken(String token)`。
+- [x] 在 `application.yml` 中新增 `jwt.secret` 和 `jwt.expiration`，默认有效期 24 小时。
+- [x] 创建 `JwtUtilTest`，覆盖 token 生成、验证和解析。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml test` 成功，`JwtUtilTest` 通过。
+
+### Step 5.2 Spring Security 配置
+
+- [x] 创建 `config/SecurityConfig.java`。
+- [x] 禁用 CSRF、表单登录和 HTTP Basic。
+- [x] 配置无状态会话 `SessionCreationPolicy.STATELESS`。
+- [x] 放行 `/api/auth/**`、`/doc.html`、`/v3/api-docs/**`、`/webjars/**`、`/swagger-ui/**`、`/ws/**`。
+- [x] 其余接口均要求认证。
+- [x] 添加 JSON 格式 401 响应，返回统一 `ApiResponse`。
+- [x] 创建 `JwtAuthenticationFilter.java`，从 `Authorization: Bearer <token>` 提取 JWT，验证后写入 `SecurityContext`。
+- [x] 创建 `CorsConfig.java`，允许 `http://localhost:8080` 和 `http://127.0.0.1:8080` 跨域。
+- [x] 提供 `PasswordEncoder` Bean，使用 BCrypt。
+- [x] 提供占位 `UserDetailsService` Bean，避免 Spring Security 自动生成默认开发密码。
+- [x] 创建 `SecurityUtils.java`，用于从当前认证上下文读取用户 ID。
+- [x] 创建 `SecurityConfigTest`，验证无 token 访问 `/api/user/profile` 返回 401。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml test` 成功，`SecurityConfigTest` 通过。
+- [x] `mvn -gs ..\settings.phase1.xml "-Dspring-boot.run.arguments=--spring.main.web-application-type=none" spring-boot:run` 成功，Spring Boot 应用上下文正常启动。
+- [x] 启动日志显示 `JwtAuthenticationFilter` 已进入 Spring Security FilterChain。
+- [x] 启动日志不再出现 Spring Security 生成默认密码的提示。
+
+### Step 5.3 用户注册与登录
+
+- [x] 创建 `service/UserService.java`，定义 `register`、`login`、`getProfile`、`updateProfile`。
+- [x] 创建 `service/impl/UserServiceImpl.java`。
+- [x] 注册逻辑：校验 username/email 唯一性，BCrypt 加密密码，保存用户，返回 profile。
+- [x] 登录逻辑：按 username 查询用户，BCrypt 校验密码，生成 JWT，返回 `LoginResponse`。
+- [x] 获取 profile：按当前认证用户 ID 查询并返回 `UserProfileResponse`。
+- [x] 更新 profile：支持修改 username、email、avatarPath，并做唯一性校验。
+- [x] 创建 `controller/UserController.java`。
+- [x] 实现 `POST /api/auth/register`。
+- [x] 实现 `POST /api/auth/login`。
+- [x] 实现 `GET /api/user/profile`，需要认证。
+- [x] 实现 `PUT /api/user/profile`，需要认证。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+- [x] `mvn -gs ..\settings.phase1.xml test` 成功；总计 5 个测试，4 个执行通过，1 个真实 MySQL Mapper 测试默认跳过。
+- [x] `mvn -gs ..\settings.phase1.xml "-Dspring-boot.run.arguments=--spring.main.web-application-type=none" spring-boot:run` 成功。
+- [ ] 未执行真实注册/登录 curl 联调，因为该验证依赖你已执行 Phase 2 的 `init.sql` 并确认 `users` 表存在。
+
+需要你做的事：
+
+- [ ] 如果还没有执行 Phase 2 的 SQL，请先在 MySQL 中执行 `backend/src/main/resources/db/init.sql`。
+- [ ] 执行 SQL 后，运行 `SHOW TABLES FROM springcloud;`，确认包含 `users` 等 7 张表。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 注册测试用户：
+  `curl -X POST http://localhost:8085/api/auth/register -H "Content-Type: application/json" -d "{\"username\":\"test\",\"email\":\"test@test.com\",\"password\":\"123456\"}"`
+- [ ] 登录获取 token：
+  `curl -X POST http://localhost:8085/api/auth/login -H "Content-Type: application/json" -d "{\"username\":\"test\",\"password\":\"123456\"}"`
+- [ ] 使用登录返回的 token 获取 profile：
+  `curl http://localhost:8085/api/user/profile -H "Authorization: Bearer <token>"`
+- [ ] 生产或长期运行前，请把 `application.yml` 中的 `jwt.secret` 改成只在本地保存的强随机密钥。
+
+说明：
+
+- 当前还没有 Phase 8 的全局异常处理，因此参数校验、用户名重复、密码错误等错误响应会在后续阶段统一美化。
+- Phase 5 已经完成认证主链路，后续聊天、漫剧、用户中心接口可以通过 `SecurityUtils.getCurrentUserId()` 获取当前用户 ID。
