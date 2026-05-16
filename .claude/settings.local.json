@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mysql *)",
+      "Bash(mvn -gs ../settings.phase1.xml compile)",
+      "Bash(mvn -gs ..\\\\settings.phase1.xml compile -q)",
+      "Bash(mvn -gs ../settings.phase1.xml compile -q)"
+    ]
+  }
+}

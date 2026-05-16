@@ -1,0 +1,9 @@
+target/
+mvn_repo/
+backend-start*.log
+*.iml
+.idea/
+.classpath
+.project
+.settings/
+logs/

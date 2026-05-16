@@ -1,0 +1,195 @@
+# 项目进度记录
+
+## 2026-05-16 Phase 1：项目脚手架与基础设施
+
+### Step 1.1 创建后端 Maven 项目
+
+- [x] 在 `F:\ai\aisay\backend` 创建 Spring Boot 3.2.12 Maven 项目骨架。
+- [x] 在 `backend/pom.xml` 配置阶段一要求的核心依赖：Web、Security、WebSocket、MyBatis-Plus、MySQL、JJWT、Redis、AMQP、Knife4j、Lombok、Commons Lang3。
+- [x] 创建主启动类 `com.aisay.manga.AisayMangaApplication`。
+- [x] 创建 `backend/src/main/resources/application.yml`，服务端口为 `8085`。
+- [x] 根据 `config.txt` 写入 MySQL、Redis、RabbitMQ 连接信息；当前 MySQL 使用 `config.txt` 中的 `springcloud` 数据库连接串。
+- [x] 创建后端包结构：`controller`、`service`、`service.impl`、`repository`、`entity`、`dto.request`、`dto.response`、`config`、`utils`。
+- [x] 新增 `settings.phase1.xml`，用于将 Maven 本地仓库放在项目内 `backend/mvn_repo`，避免写入全局 Maven 目录。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+- [x] `mvn -gs ..\settings.phase1.xml "-Dspring-boot.run.arguments=--spring.main.web-application-type=none" spring-boot:run` 成功，Spring Boot 应用上下文正常启动。
+- [x] 启动日志已出现 Spring Boot、Redis repository 扫描、MyBatis-Plus 标识。
+
+说明：
+
+- 首次直接执行 Maven 时，全局 Maven 仓库目录 `D:\software\maven\apache-maven-3.9.4\mvn_repo` 无写入权限；已通过项目级 `settings.phase1.xml` 规避。
+- 后端当前没有 Mapper，启动日志出现 `No MyBatis mapper was found` 属于阶段一预期，后续 Phase 3 增加 Mapper 后会消失。
+
+### Step 1.2 创建前端 Vite + Vue 3 项目
+
+- [x] 在 `F:\ai\aisay\frontend` 创建 Vite + Vue 3 + TypeScript 项目骨架。
+- [x] 配置依赖：Vue Router、Pinia、Axios、Element Plus、Dayjs、Markdown-it、SockJS Client、STOMP.js。
+- [x] 配置开发依赖：Vite、Vue 插件、TypeScript、Vue TSC、Sass。
+- [x] 配置 `frontend/vite.config.ts`：开发端口 `8080`，`/api` 代理到 `http://localhost:8085`，`/ws` 代理到 `ws://localhost:8085`。
+- [x] 创建前端目录结构：`views`、`components/chat`、`components/story`、`components/common`、`stores`、`api`、`router`、`types`、`styles`。
+- [x] 创建 `src/main.ts`，完成 App、Element Plus、Pinia、Vue Router 挂载。
+- [x] 创建 `src/App.vue`，提供基础 `<router-view />` 布局。
+- [x] 创建 `src/router/index.ts`，当前为空路由表，等待后续阶段逐步填充。
+
+验证结果：
+
+- [x] `npm install --cache .\.npm-cache` 成功，生成 `package-lock.json` 和本地依赖。
+- [x] `npm run build` 成功，TypeScript 与 Vite 构建通过。
+- [x] `npm run dev -- --host 127.0.0.1` 短时烟测成功，Vite 在 `http://127.0.0.1:8080/` 就绪。
+
+说明：
+
+- `npm install` 报告 2 个 moderate 级别依赖审计提示，阶段一未执行强制升级，避免破坏锁定依赖树；后续可单独安排 `npm audit` 处理。
+- `npm run build` 输出了 Element Plus 体积导致的 chunk size 提示，属于当前全量引入 UI 库的预期提示，后续可通过按需引入或分包优化。
+
+### 阶段一完成状态
+
+- [x] 后端脚手架完成。
+- [x] 前端脚手架完成。
+- [x] 基础配置完成。
+- [x] 编译与启动烟测完成。
+- [x] 进度文档已记录。
+- [x] 架构文档已补充。
+
+## 2026-05-16 Phase 2：数据库初始化
+
+### Step 2.1 创建 MySQL 数据库与表结构
+
+- [x] 创建 `backend/src/main/resources/db/init.sql`，用于手动初始化数据库。
+- [x] SQL 默认使用 `config.txt` 和 `application.yml` 中的 `springcloud` 数据库。
+- [x] SQL 中包含 `CREATE DATABASE IF NOT EXISTS springcloud CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`。
+- [x] SQL 中包含实现计划要求的业务用户授权：`aisay` / `aisay_pass`，授权范围为 `springcloud.*`。
+- [x] SQL 中包含 7 张核心表：`users`、`chat_sessions`、`messages`、`stories`、`characters`、`scenes`、`dialogues`。
+- [x] 表结构包含主键、唯一键、常用索引、JSON 字段、外键约束和级联删除规则。
+
+验证结果：
+
+- [x] SQL 文件已生成。
+- [ ] 未执行 SQL，按用户要求由用户自行执行。
+- [ ] 未执行 `SHOW TABLES FROM springcloud;`，等待用户执行 SQL 后验证。
+
+说明：
+
+- 设计文档和实现计划示例库名为 `aisay_manga`，但 `config.txt` 提供的连接串指向 `springcloud`；本阶段选择与当前运行配置保持一致。
+- 如果后续决定改用 `aisay_manga`，需要同时替换 `init.sql` 中库名和 `backend/src/main/resources/application.yml` 的 datasource url。
+
+### Step 2.2 配置 MyBatis-Plus 连接
+
+- [x] 在 `application.yml` 中新增 `mybatis-plus.mapper-locations`。
+- [x] 在 `application.yml` 中新增 `mybatis-plus.type-aliases-package`，指向 `com.aisay.manga.entity`。
+- [x] 在 `application.yml` 中启用下划线转驼峰映射。
+- [x] 在 `application.yml` 中配置全局主键类型和逻辑删除值。
+- [x] 创建 `com.aisay.manga.config.MyBatisPlusConfig`，注册 `MybatisPlusInterceptor`。
+- [x] 在 `MyBatisPlusConfig` 中加入 MySQL 分页插件 `PaginationInnerInterceptor`。
+- [x] 在 `MyBatisPlusConfig` 中加入乐观锁插件 `OptimisticLockerInnerInterceptor`。
+- [x] 创建 `com.aisay.manga.config.RedisConfig`。
+- [x] 在 `RedisConfig` 中配置 `RedisTemplate<String, Object>`，key 使用字符串序列化，value 使用 JSON 序列化。
+- [x] 创建 `backend/src/main/resources/mapper/.gitkeep`，保留 XML Mapper 目录。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+- [x] `mvn -gs ..\settings.phase1.xml "-Dspring-boot.run.arguments=--spring.main.web-application-type=none" spring-boot:run` 成功，Spring Boot 应用上下文正常启动。
+- [x] 启动日志出现 MyBatis-Plus 3.5.5 标识和 Redis repository 扫描日志。
+
+说明：
+
+- 当前还没有 Entity 和 Mapper，启动日志中的 `No MyBatis mapper was found` 仍属于预期，Phase 3 创建 Mapper 后会自然消失。
+- 本阶段未实际连接并查询 MySQL 表，因为 SQL 按要求未由我执行。
+
+## 2026-05-16 Phase 3：后端实体与数据访问层
+
+### Step 3.1 创建所有 Entity 类
+
+- [x] 创建 `User.java`，映射 `users` 表，主键使用 `@TableId(type = IdType.AUTO)`。
+- [x] 创建 `ChatSession.java`，映射 `chat_sessions` 表，`contextData` 使用 `JacksonTypeHandler`。
+- [x] 创建 `Message.java`，映射 `messages` 表，`metadata` 使用 `JacksonTypeHandler`。
+- [x] 创建 `Story.java`，映射 `stories` 表。
+- [x] 创建 `Character.java`，映射 `characters` 表，`appearance` 使用 `JacksonTypeHandler`。
+- [x] 创建 `Scene.java`，映射 `scenes` 表，`visualElements` 使用 `JacksonTypeHandler`。
+- [x] 创建 `Dialogue.java`，映射 `dialogues` 表，`order` 字段使用反引号列名映射。
+- [x] 所有 Entity 使用 Lombok `@Data`、`@NoArgsConstructor`、`@AllArgsConstructor`。
+- [x] 为 `Character.java` 添加 MyBatis `@Alias("MangaCharacter")`，避免与 `java.lang.Character` 类型别名冲突。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+
+### Step 3.2 创建 Mapper 接口
+
+- [x] 创建 `UserMapper.java`，继承 `BaseMapper<User>`。
+- [x] 创建 `ChatSessionMapper.java`，继承 `BaseMapper<ChatSession>`，并提供按 `userId + status` 查询的方法。
+- [x] 创建 `MessageMapper.java`，继承 `BaseMapper<Message>`，并提供按 `sessionId` 与创建时间升序查询的方法。
+- [x] 创建 `StoryMapper.java`，继承 `BaseMapper<Story>`，并提供按 `userId` 分页查询的方法。
+- [x] 创建 `CharacterMapper.java`，继承 `BaseMapper<Character>`。
+- [x] 创建 `SceneMapper.java`，继承 `BaseMapper<Scene>`。
+- [x] 创建 `DialogueMapper.java`，继承 `BaseMapper<Dialogue>`。
+- [x] 在 `AisayMangaApplication` 添加 `@MapperScan("com.aisay.manga.repository")`。
+- [x] 创建 `UserMapperTest`，用于 MySQL insert + select + delete 集成验证。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+- [x] `mvn -gs ..\settings.phase1.xml test` 成功；`UserMapperTest` 默认跳过，避免数据库未初始化时误失败。
+- [x] `mvn -gs ..\settings.phase1.xml "-Dspring-boot.run.arguments=--spring.main.web-application-type=none" spring-boot:run` 成功，Spring Boot 应用上下文正常启动。
+- [x] 启动日志不再出现 `No MyBatis mapper was found`。
+
+需要你做的事：
+
+- [ ] 如果还没有执行 Phase 2 的 SQL，请先在 MySQL 中执行 `backend/src/main/resources/db/init.sql`。
+- [ ] 执行 SQL 后，建议在 MySQL 中运行 `SHOW TABLES FROM springcloud;`，确认 7 张表都已存在。
+- [ ] 数据库表确认存在后，可在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml "-Daisay.integration.mysql=true" test`，开启真实 MySQL 版 `UserMapperTest`。
+- [ ] 如果你决定把库名从当前 `springcloud` 切换为设计文档中的 `aisay_manga`，请同步修改 `backend/src/main/resources/db/init.sql` 和 `backend/src/main/resources/application.yml`。
+
+说明：
+
+- `UserMapperTest` 默认使用 `@EnabledIfSystemProperty` 保护，只有显式传入 `-Daisay.integration.mysql=true` 才会访问真实 MySQL。
+- 当前阶段只实现数据模型和访问层，不包含 DTO、Service、Controller、认证和业务接口；这些属于 Phase 4 之后。
+
+## 2026-05-16 Phase 4：后端 DTO 层
+
+### Step 4.1 创建请求 DTO
+
+- [x] 在 `pom.xml` 中新增 `spring-boot-starter-validation`，用于支持 Jakarta Bean Validation。
+- [x] 创建 `RegisterRequest.java`：`username`、`email`、`password`，包含非空、邮箱格式和长度校验。
+- [x] 创建 `LoginRequest.java`：`username`、`password`，包含非空和长度校验。
+- [x] 创建 `ChatStartRequest.java`：`title` 可选，包含最大长度校验。
+- [x] 创建 `SendMessageRequest.java`：`sessionId`、`content`，包含非空和消息长度校验。
+- [x] 创建 `StoryGenerateRequest.java`：`sessionId`，包含非空校验。
+- [x] 创建 `StoryUpdateRequest.java`：`title`、`genre`、`style`、`synopsis` 均可选，包含长度校验。
+- [x] 创建 `UserUpdateRequest.java`：`username`、`email`、`avatarPath` 均可选，包含长度和邮箱格式校验。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+
+### Step 4.2 创建响应 DTO
+
+- [x] 创建 `ApiResponse<T>.java`：统一响应体 `code`、`message`、`data`、`timestamp`，并提供 `success` / `fail` 静态工厂方法。
+- [x] 创建 `LoginResponse.java`：`token`、`userId`、`username`。
+- [x] 创建 `ChatSessionResponse.java`：`id`、`sessionKey`、`title`、`status`、`startedAt`、`lastActive`。
+- [x] 创建 `MessageResponse.java`：`id`、`sessionId`、`role`、`content`、`createdAt`。
+- [x] 创建 `StoryResponse.java`：`id`、`title`、`genre`、`style`、`synopsis`、`status`、`coverImagePath`、`createdAt`。
+- [x] 创建 `StoryDetailResponse.java`：继承 `StoryResponse`，补充 `fullContent`、`characters`、`scenes`。
+- [x] 在 `StoryDetailResponse` 中定义 `CharacterItem` 与 `SceneItem`，用于承载详情页所需的角色和场景数据。
+- [x] 创建 `UserProfileResponse.java`：`id`、`username`、`email`、`avatarPath`、`createdAt`。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+- [x] `mvn -gs ..\settings.phase1.xml test` 成功；真实 MySQL 版 `UserMapperTest` 仍默认跳过。
+- [x] `mvn -gs ..\settings.phase1.xml "-Dspring-boot.run.arguments=--spring.main.web-application-type=none" spring-boot:run` 成功，Spring Boot 应用上下文正常启动。
+
+需要你做的事：
+
+- [ ] Phase 4 本身不需要你手动操作数据库或中间件。
+- [ ] 如果还没执行 Phase 2 的 SQL，仍建议先执行 `backend/src/main/resources/db/init.sql`，否则 Phase 5 之后的真实接口测试会因为表不存在而失败。
+- [ ] 如果想提前验证真实 MySQL Mapper，请在确认表存在后运行 `mvn -gs ..\settings.phase1.xml "-Daisay.integration.mysql=true" test`。
+
+说明：
+
+- DTO 只负责 API 入参与出参承载，不直接依赖 Mapper，也不写业务逻辑。
+- 请求 DTO 当前只包含基础格式校验；用户名/邮箱唯一性、会话归属、故事归属等业务校验会放在后续 Service 层。
