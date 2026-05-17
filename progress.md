@@ -734,3 +734,94 @@
 - [ ] `POST /api/auth/login` 必须返回 200 且响应中包含 token；如果不是 200，请检查用户名密码是否正确、账号是否已注册、后端是否连接到已初始化的 MySQL。
 - [ ] 如果 `GET /api/user/profile` 返回 401，说明 token 未被后端接受，需要重点检查后端 JWT 配置、后端是否重启后使用了不同密钥、请求头是否携带 `Authorization: Bearer <token>`。
 - [ ] 如果 `/chat` 页面显示错误提示，请根据提示优先确认后端 `8085` 已启动、MySQL 表已初始化、当前账号能正常调用 `GET /api/chat/sessions`。
+
+## 2026-05-17 Phase 12：前端漫剧模块
+
+### Step 12.1 Story API 与 Story Store
+
+- [x] 新增 `frontend/src/types/story.ts`，定义 `StoryResponse`、`StoryDetailResponse`、`StoryCharacter`、`StoryScene`、`StoryUpdateRequest`、`StoryPageResponse`。
+- [x] 新增 `frontend/src/api/storyApi.ts`。
+- [x] 实现 `getStories(page, size)`，调用 `GET /api/story/list`。
+- [x] 实现 `getStoryDetail(id)`，调用 `GET /api/story/{id}`。
+- [x] 实现 `generateStory(sessionId)`，调用 `POST /api/story/generate`。
+- [x] 实现 `updateStory(id, data)`，调用 `PUT /api/story/{id}`。
+- [x] 实现 `deleteStory(id)`，调用 `DELETE /api/story/{id}`。
+- [x] 新增 `frontend/src/stores/storyStore.ts`。
+- [x] Store state 包含 `stories`、`currentStory`、`pagination`、`isLoading`、`isGenerating`。
+- [x] Store actions 包含 `fetchStories`、`fetchStoryDetail`、`generateStory`、`updateStory`、`deleteStory`。
+- [x] `fetchStories` 会读取后端 MyBatis-Plus 分页结构，并同步 `current/size/total/pages`。
+
+验证结果：
+
+- [x] `npm run build` 成功，`vue-tsc` 类型检查和 Vite 构建均通过。
+
+### Step 12.2 漫剧列表页
+
+- [x] 重写 `frontend/src/views/StoryList.vue`。
+- [x] 页面顶部展示漫剧库说明和“去对话生成”入口。
+- [x] 卡片网格展示漫剧封面占位、标题、类型、状态、摘要和创建时间。
+- [x] 支持分页组件，分页变化会重新调用 `storyStore.fetchStories`。
+- [x] 支持当前页内标题/摘要搜索。
+- [x] 支持当前页内类型筛选和状态筛选。
+- [x] 点击卡片或“查看”按钮跳转 `/story/{id}`。
+- [x] 删除按钮带确认弹窗，确认后调用后端删除接口并刷新本地列表状态。
+
+验证结果：
+
+- [x] 未登录访问 `/stories` 会被路由守卫跳转到 `/login?redirect=/stories`，浏览器控制台无错误。
+- [ ] 未执行真实列表数据联调，因为需要已登录账号、后端运行和数据库中存在当前用户的漫剧数据。
+
+### Step 12.3 漫剧详情页
+
+- [x] 重写 `frontend/src/views/StoryDetailView.vue`。
+- [x] 顶部展示标题、类型、风格、状态和操作按钮。
+- [x] 内容区展示故事摘要、完整内容、角色设定和场景列表。
+- [x] 新增 `frontend/src/components/story/CharacterCard.vue`，展示角色头像占位、名称、角色定位、描述、性格和外观字段。
+- [x] 详情页支持编辑基础信息：标题、类型、风格、摘要。
+- [x] 保存编辑会调用 `storyStore.updateStory`，并同步当前详情状态。
+- [x] 删除详情会调用 `storyStore.deleteStory`，成功后回到 `/stories`。
+- [x] “生成封面”按钮已作为后续 AI 图片能力预留，目前显示提示，不调用后端。
+
+验证结果：
+
+- [x] `npm run build` 成功。
+- [ ] 未访问真实 `/story/{id}` 联调，因为需要当前登录用户拥有对应 story 数据。
+
+### Step 12.4 对话中触发漫剧生成
+
+- [x] 更新 `frontend/src/views/ChatView.vue`。
+- [x] 在聊天页头部加入“生成漫剧”按钮。
+- [x] 按钮仅在当前会话存在时可用，生成中显示 loading。
+- [x] 点击后调用 `storyStore.generateStory(currentSessionId)`。
+- [x] 生成成功后向聊天消息区追加一条本地 AI 提示消息。
+- [x] 生成成功后自动跳转到 `/story/{id}` 查看详情。
+- [x] 更新 `frontend/src/stores/chatStore.ts`，新增 `addLocalAiMessage`，用于追加前端本地提示消息。
+
+验证结果：
+
+- [x] `npm run build` 成功。
+- [ ] 未执行真实“对话生成漫剧”联调，因为需要登录后创建真实会话，并确保后端 `POST /api/story/generate` 可访问。
+
+构建提示：
+
+- [ ] Vite 仍提示主 chunk 大于 500KB，主要来自 Element Plus 全量引入；这是性能优化提示，不影响阶段十二功能。
+- [ ] Dart Sass 仍输出 legacy JS API deprecation warning，这是依赖链提示，不影响构建结果。
+- [ ] Rollup 仍对 `@vueuse/core` 的 `#__PURE__` 注释位置给出提示，不影响构建结果。
+
+需要你做的事：
+
+- [ ] 确认已经执行 Phase 2 的 SQL，数据库中存在 `stories`、`characters`、`scenes`、`chat_sessions` 等表。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 启动前端：在 `frontend` 目录运行 `npm run dev`。
+- [ ] 登录后访问 `/chat`，先创建或选择一个会话，再点击“生成漫剧”。
+- [ ] 生成成功后应自动进入 `/story/{id}`，并看到摘要、角色卡片和场景列表。
+- [ ] 访问 `/stories`，确认新生成的漫剧出现在列表中。
+- [ ] 在详情页尝试编辑标题、类型、风格、摘要，确认保存成功后页面内容更新。
+- [ ] 删除漫剧会同时删除关联角色、场景等后端级联数据；删除前请确认该测试数据不需要保留。
+
+说明：
+
+- 阶段十二只接入后端已有的模拟漫剧生成接口，不调用 Python/LangChain AI 引擎。
+- 当前列表筛选是前端当前页内筛选，因为后端接口暂未支持搜索、类型和状态查询参数。
+- 当前后端 `StoryResponse` 未返回 `updatedAt`，列表时间暂显示 `createdAt`。
+- 封面生成入口已预留，后续需要 AI 图片生成或文件上传能力后再接真实接口。

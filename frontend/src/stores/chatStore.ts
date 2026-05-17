@@ -179,6 +179,20 @@ export const useChatStore = defineStore('chat', () => {
     };
   }
 
+  function addLocalAiMessage(content: string, sessionId = currentSessionId.value) {
+    if (!sessionId) {
+      return;
+    }
+
+    messages.value.push({
+      id: -Date.now(),
+      sessionId,
+      role: 'ai',
+      content,
+      createdAt: new Date().toISOString(),
+    });
+  }
+
   return {
     currentSessionId,
     currentSession,
@@ -195,5 +209,6 @@ export const useChatStore = defineStore('chat', () => {
     deleteSession,
     connectWebSocket,
     disconnectWebSocket,
+    addLocalAiMessage,
   };
 });

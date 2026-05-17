@@ -443,7 +443,7 @@ flowchart LR
 
 路由结构：
 
-- `/` 重定向到 `/chat`。
+- `/` 会根据本地 token 是否有效重定向到 `/chat` 或 `/login`。
 - `/login` 和 `/register` 是访客页面，不套用主布局。
 - `/chat`、`/chat/:sessionId`、`/stories`、`/story/:id`、`/user` 是受保护页面，统一挂在 `AppLayout` 下。
 - 未知前端路径兜底重定向到 `/chat`，再由守卫决定是否需要登录。
@@ -451,10 +451,10 @@ flowchart LR
 
 守卫规则：
 
-- 受保护路由依赖 `localStorage.token` 判断登录态。
+- 受保护路由依赖 `localStorage.token` 判断登录态，并会解析 JWT `exp` 清理过期登录态。
 - 未登录访问受保护路由时跳转 `/login?redirect=<原路径>`。
 - 已登录访问 `/login` 或 `/register` 时跳转 `/chat`。
-- Phase 10 接入 Pinia 用户 Store 后，可以保留当前路由结构，只把登录态读取从 `localStorage` 升级为 Store + 持久化同步。
+- 当前路由守卫保持轻量，Pinia 用户 Store 负责登录、退出和用户资料持久化。
 
 布局职责：
 
@@ -466,16 +466,16 @@ flowchart LR
 
 页面边界：
 
-- `ChatView` 当前只展示会话路由占位和可选 `sessionId`，真实聊天组件会在 Phase 11 接入。
-- `StoryList` 当前只展示列表占位，真实列表、分页、筛选会在 Phase 12 接入。
-- `StoryDetailView` 当前只展示路由作品 ID，真实详情、角色卡片、场景列表会在 Phase 12 接入。
+- `ChatView` 已接入会话列表、消息列表、输入区、WebSocket 订阅和生成漫剧入口。
+- `StoryList` 已接入漫剧卡片网格、分页、当前页筛选和删除入口。
+- `StoryDetailView` 已接入摘要、完整内容、角色卡片、场景列表、编辑和删除入口。
 - `UserCenter` 当前只展示用户中心占位，真实资料编辑和统计会在 Phase 13 接入。
-- `LoginView` 和 `RegisterView` 当前为 Phase 10 预留，`LoginView` 只提供临时本地 token 写入来验证阶段九守卫。
+- `LoginView` 和 `RegisterView` 已接入真实认证接口。
 
 设计约束：
 
-- 阶段九不直接调用后端 API，避免把路由布局工作和认证业务耦合在一起。
-- 当前临时 token 仅用于本地路由验证，不代表真实认证；Phase 10 必须替换为 `POST /api/auth/login` 返回的 JWT。
+- 路由层只做最小登录态判断和过期 token 清理，业务数据加载仍放在各页面 Store 中。
+- 登录 token 来自 `POST /api/auth/login` 返回的 JWT，并通过 Axios 拦截器注入后续 API 请求。
 - 视觉层保留明确的品牌感和响应式布局，但不抢占后续聊天、漫剧列表、用户中心的业务组件设计空间。
 
 ## 前端认证模块
@@ -660,3 +660,76 @@ WebSocket 约定：
 - WebSocket 断线不会阻塞 HTTP 聊天流程，页面会显示 `HTTP 模式`，发送和历史查询仍可用。
 - 聊天页初始化加载会话失败时会保留页面框架，并显示错误提示和重新加载入口，避免接口异常或登录态问题表现为纯白屏。
 - 开发服务通过 Vite `server.headers` 返回 `Cache-Control: no-store`，减少开发阶段浏览器复用旧模块造成的前端状态错乱。
+
+## 前端漫剧模块
+
+Phase 12 补齐前端漫剧模块，围绕后端 Phase 7 的 `/api/story/*` REST 接口实现漫剧列表、详情、编辑、删除，以及从聊天会话触发模拟漫剧生成。
+
+```mermaid
+flowchart LR
+    ChatView["ChatView"]
+    StoryList["StoryList"]
+    StoryDetail["StoryDetailView"]
+    CharacterCard["CharacterCard"]
+    StoryStore["storyStore"]
+    StoryApi["storyApi"]
+    Axios["Axios request"]
+    Backend["Spring Boot /api/story"]
+
+    ChatView --> StoryStore
+    StoryList --> StoryStore
+    StoryDetail --> StoryStore
+    StoryDetail --> CharacterCard
+    StoryStore --> StoryApi
+    StoryApi --> Axios
+    Axios --> Backend
+```
+
+API 层职责：
+
+- `api/storyApi.ts` 封装 `getStories`、`getStoryDetail`、`generateStory`、`updateStory`、`deleteStory`。
+- 所有 story 请求复用统一 Axios 实例，自动携带 JWT，并沿用 401 统一跳转登录逻辑。
+- `GET /api/story/list` 读取 MyBatis-Plus 分页对象，前端从 `records/current/size/total/pages` 维护分页状态。
+
+Store 职责：
+
+- `stores/storyStore.ts` 维护 `stories`、`currentStory`、`pagination`、`isLoading`、`isGenerating`。
+- `fetchStories` 同步列表和分页状态，并对异常结构兜底为空数组。
+- `fetchStoryDetail` 加载当前详情，包括 `fullContent`、角色列表和场景列表。
+- `generateStory` 调用后端模拟生成接口，并把新漫剧插入本地列表顶部。
+- `updateStory` 更新列表和当前详情，`deleteStory` 删除列表项并清理当前详情。
+
+页面与组件职责：
+
+- `StoryList` 使用卡片网格展示漫剧，支持当前页内标题/摘要搜索、类型筛选、状态筛选、分页和删除确认。
+- `StoryDetailView` 展示标题、类型、风格、状态、摘要、完整内容、角色卡片和场景列表，并提供编辑和删除入口。
+- `CharacterCard` 负责角色头像占位、名称、角色定位、描述、性格和外观字段展示。
+- `ChatView` 在当前会话存在时提供“生成漫剧”按钮，生成成功后追加本地 AI 提示消息，并跳转到详情页。
+
+生成流：
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant Chat as ChatView
+    participant Store as storyStore
+    participant Api as storyApi/Axios
+    participant Backend as StoryController
+    participant Router as Vue Router
+
+    User->>Chat: 点击生成漫剧
+    Chat->>Store: generateStory(currentSessionId)
+    Store->>Api: POST /api/story/generate
+    Api->>Backend: sessionId
+    Backend-->>Store: StoryResponse
+    Store-->>Chat: 新漫剧
+    Chat->>Chat: 追加本地 AI 提示消息
+    Chat->>Router: 跳转 /story/{id}
+```
+
+设计约束：
+
+- 当前列表筛选为前端当前页筛选，因为后端 Phase 7 接口尚未提供搜索、类型、状态查询参数。
+- 当前封面生成为预留按钮，真实图片生成需要后续 AI 图片能力或文件上传流程接入。
+- 后端 `StoryResponse` 当前未返回 `updatedAt`，列表暂以 `createdAt` 展示时间；若后续需要精确更新时间，可以扩展后端 DTO。
+- 漫剧生成仍是后端模拟数据，不调用 Python/LangChain AI 引擎。

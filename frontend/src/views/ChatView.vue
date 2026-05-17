@@ -16,9 +16,20 @@
           <p class="eyebrow">Chat Studio</p>
           <h1>{{ chatStore.currentSession?.title || 'AI 漫剧对话' }}</h1>
         </div>
-        <el-tag :type="chatStore.isConnected ? 'success' : 'info'" effect="plain">
-          {{ chatStore.isConnected ? 'WebSocket 已连接' : 'HTTP 模式' }}
-        </el-tag>
+        <div class="chat-actions">
+          <el-button
+            type="primary"
+            plain
+            :loading="storyStore.isGenerating"
+            :disabled="!chatStore.currentSessionId"
+            @click="handleGenerateStory"
+          >
+            生成漫剧
+          </el-button>
+          <el-tag :type="chatStore.isConnected ? 'success' : 'info'" effect="plain">
+            {{ chatStore.isConnected ? 'WebSocket 已连接' : 'HTTP 模式' }}
+          </el-tag>
+        </div>
       </header>
 
       <el-alert
@@ -69,6 +80,7 @@ import MessageBubble from '../components/chat/MessageBubble.vue';
 import InputArea from '../components/chat/InputArea.vue';
 import SessionList from '../components/chat/SessionList.vue';
 import { useChatStore } from '../stores/chatStore';
+import { useStoryStore } from '../stores/storyStore';
 
 const props = defineProps<{
   sessionId?: string;
@@ -76,6 +88,7 @@ const props = defineProps<{
 
 const router = useRouter();
 const chatStore = useChatStore();
+const storyStore = useStoryStore();
 const messageContainerRef = ref<HTMLElement>();
 const isCreating = ref(false);
 const pageError = ref('');
@@ -178,6 +191,21 @@ async function handleSendMessage(content: string) {
   });
 }
 
+async function handleGenerateStory() {
+  if (!chatStore.currentSessionId) {
+    ElMessage.warning('请先创建或选择一个对话会话');
+    return;
+  }
+
+  await runSafely(async () => {
+    const story = await storyStore.generateStory(chatStore.currentSessionId as number);
+    chatStore.addLocalAiMessage(`漫剧《${story.title}》已生成，你可以在漫剧详情页继续查看和编辑。`, chatStore.currentSessionId);
+    ElMessage.success('漫剧生成成功');
+    await scrollToBottom();
+    router.push(`/story/${story.id}`);
+  });
+}
+
 async function scrollToBottom() {
   await nextTick();
   const container = messageContainerRef.value;
@@ -240,6 +268,14 @@ function getErrorMessage(error: unknown) {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 18px;
+}
+
+.chat-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
 }
 
 .eyebrow {
