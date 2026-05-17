@@ -282,3 +282,76 @@ WebSocket 规则：
 ## 后续演进
 
 Phase 7 到 Phase 8 会在后端现有包结构中继续补齐漫剧、文件与异常处理。Phase 9 之后会在前端现有目录中逐步实现路由、布局、认证、聊天、漫剧和用户中心页面。
+
+## 漫剧服务模块
+
+Phase 7 在后端补齐 `StoryService` 与 `StoryController`，让“对话收集需求 -> 生成漫剧草稿 -> 查看/编辑/删除作品”的主链路有了可调用的 REST API。当前实现仍是 MVP 模拟生成，不接入 Python/LangChain AI 引擎，也不投递 RabbitMQ 异步任务。
+
+```mermaid
+flowchart LR
+    Client["前端 / API 调用方"]
+    Controller["StoryController"]
+    Service["StoryServiceImpl"]
+    StoryMapper["StoryMapper"]
+    CharacterMapper["CharacterMapper"]
+    SceneMapper["SceneMapper"]
+    ChatSessionMapper["ChatSessionMapper"]
+    MySQL["MySQL"]
+
+    Client -->|/api/story/*| Controller
+    Controller --> Service
+    Service --> ChatSessionMapper
+    Service --> StoryMapper
+    Service --> CharacterMapper
+    Service --> SceneMapper
+    ChatSessionMapper --> MySQL
+    StoryMapper --> MySQL
+    CharacterMapper --> MySQL
+    SceneMapper --> MySQL
+```
+
+模块职责：
+
+- `StoryController` 只负责接收 HTTP 请求、读取当前登录用户 ID、调用服务层并包装 `ApiResponse`。
+- `StoryServiceImpl` 负责业务规则：会话归属校验、漫剧归属校验、模拟生成、分页查询、详情组装、字段更新和删除。
+- `StoryMapper` 负责 `stories` 主表 CRUD 与当前用户漫剧分页查询。
+- `CharacterMapper` 和 `SceneMapper` 负责加载或写入漫剧详情页所需的角色、场景数据。
+- `ChatSessionMapper` 在生成漫剧前用于确认 `sessionId` 合法，保证用户只能基于自己的会话生成作品。
+
+接口边界：
+
+- `POST /api/story/generate` 需要登录，并要求请求体包含 `sessionId`；当前会创建 1 条 `stories`、2 条 `characters`、2 条 `scenes`。
+- `GET /api/story/list?page=1&size=10` 返回当前用户的分页漫剧列表，排序规则为 `updated_at DESC, id DESC`。
+- `GET /api/story/{id}` 返回当前用户拥有的漫剧详情，包括 `fullContent`、`characters`、`scenes`。
+- `PUT /api/story/{id}` 只更新请求中非 `null` 字段，适合前端做局部编辑。
+- `DELETE /api/story/{id}` 删除当前用户拥有的漫剧；关联角色、场景、对白依赖数据库外键级联清理。
+
+数据流：
+
+```mermaid
+sequenceDiagram
+    participant Client as 前端
+    participant StoryApi as StoryController
+    participant StoryService as StoryServiceImpl
+    participant SessionDb as chat_sessions
+    participant StoryDb as stories
+    participant DetailDb as characters/scenes
+
+    Client->>StoryApi: POST /api/story/generate
+    StoryApi->>StoryService: generateStory(userId, sessionId)
+    StoryService->>SessionDb: 校验会话存在且属于当前用户
+    StoryService->>StoryDb: 插入模拟 Story 草稿
+    StoryService->>DetailDb: 插入默认角色和场景
+    StoryService-->>Client: StoryResponse
+    Client->>StoryApi: GET /api/story/{id}
+    StoryApi->>StoryService: getStoryDetail(storyId, userId)
+    StoryService->>StoryDb: 校验漫剧归属
+    StoryService->>DetailDb: 加载角色和场景
+    StoryService-->>Client: StoryDetailResponse
+```
+
+设计约束：
+
+- 权限校验放在服务层，避免不同入口重复实现归属判断。
+- DTO 不暴露数据库内部统计字段之外的敏感信息，详情页只返回前端当前阶段需要的故事、角色和场景。
+- 当前生成内容是固定模拟数据，后续接入 AI 引擎时可以保持 Controller 契约不变，只替换 `StoryServiceImpl.generateStory` 内部编排逻辑。

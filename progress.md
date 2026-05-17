@@ -348,3 +348,57 @@
 - 当前聊天 AI 回复为固定模拟字符串，符合实现计划对 MVP 的限定；未接入 Python/LangChain AI 引擎。
 - WebSocket 握手路径 `/ws/**` 按 Phase 5 安全配置放行，但发送消息时仍要求 STOMP header 中携带有效 JWT。
 - 当前还没有 Phase 8 的全局异常处理，非法会话、越权访问、WebSocket token 缺失等错误会在后续统一收口为标准 JSON 错误响应。
+
+## 2026-05-17 Phase 7：后端漫剧服务
+
+### Step 7.1 漫剧 CRUD
+
+- [x] 新增 `service/StoryService.java`，定义漫剧生成、详情、列表、更新、删除能力。
+- [x] 新增 `service/impl/StoryServiceImpl.java`，集中处理漫剧归属校验、分页查询、详情组装、更新和删除。
+- [x] 新增 `controller/StoryController.java`，提供 `POST /api/story/generate`、`GET /api/story/{id}`、`GET /api/story/list`、`PUT /api/story/{id}`、`DELETE /api/story/{id}`。
+- [x] `getStoryDetail` 会查询 `stories` 主记录，并加载对应 `characters` 与 `scenes`，组装为 `StoryDetailResponse`。
+- [x] `getUserStories` 使用 MyBatis-Plus `Page` 和 `StoryMapper.selectPageByUserId`，按 `updated_at DESC, id DESC` 返回当前用户的漫剧列表。
+- [x] `updateStory` 只更新请求中非 `null` 的字段，并刷新 `updatedAt`。
+- [x] `deleteStory` 先校验当前用户是否拥有该漫剧，再物理删除 `stories` 记录；关联的 `characters`、`scenes`、`dialogues` 依赖 `init.sql` 中的外键级联规则删除。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+- [x] `mvn -gs ..\settings.phase1.xml test` 成功；共 5 个测试，4 个执行通过，1 个真实 MySQL Mapper 测试默认跳过。
+- [x] 随机端口短启动烟测成功：Tomcat 正常启动，`SimpleBrokerMessageHandler` 可用，说明应用上下文和 WebSocket broker 正常。
+- [ ] 固定端口 `8085` 短启动烟测两次遇到端口占用；最终监听检查未发现 8085 残留监听。正式联调前如果再次遇到该问题，请先确认是否已有后端窗口占用 8085。
+- [ ] 真实 CRUD curl 联调未执行，因为需要你先确认数据库 SQL 已执行，并使用登录接口获取有效 token。
+
+### Step 7.2 模拟漫剧生成接口
+
+- [x] `generateStory(Long userId, StoryGenerateRequest request)` 已实现。
+- [x] 生成前会校验 `sessionId` 对应的会话存在、未删除并属于当前登录用户。
+- [x] 生成模拟 `Story`：标题 `示例漫剧`、类型 `科幻`、风格 `日漫`、状态 `draft`，并写入示例摘要和正文。
+- [x] 自动创建 2 个默认角色：`林澈`、`星野`。
+- [x] 自动创建 2 个默认场景：`新海市废弃天文台`、`霓虹雨巷`。
+- [x] 生成接口返回 `StoryResponse`，详情接口可返回完整正文、角色列表和场景列表。
+
+需要你做的事：
+
+- [ ] 如果还没有执行 Phase 2 的 SQL，请先在 MySQL 中执行 `backend/src/main/resources/db/init.sql`。
+- [ ] 执行 SQL 后，建议运行 `SHOW TABLES FROM springcloud;`，确认 `users`、`chat_sessions`、`messages`、`stories`、`characters`、`scenes`、`dialogues` 都存在。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 注册并登录获取 token；如果已有测试账号，可以直接登录。
+- [ ] 先创建会话，因为模拟漫剧生成需要 `sessionId`：
+  `curl -X POST http://localhost:8085/api/chat/start -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d "{\"title\":\"漫剧生成测试\"}"`
+- [ ] 生成漫剧：
+  `curl -X POST http://localhost:8085/api/story/generate -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d "{\"sessionId\":1}"`
+- [ ] 查询列表：
+  `curl "http://localhost:8085/api/story/list?page=1&size=10" -H "Authorization: Bearer <token>"`
+- [ ] 查询详情：
+  `curl http://localhost:8085/api/story/1 -H "Authorization: Bearer <token>"`
+- [ ] 更新漫剧：
+  `curl -X PUT http://localhost:8085/api/story/1 -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d "{\"title\":\"新的漫剧标题\",\"genre\":\"冒险\",\"style\":\"国漫\"}"`
+- [ ] 删除漫剧：
+  `curl -X DELETE http://localhost:8085/api/story/1 -H "Authorization: Bearer <token>"`
+
+说明：
+
+- 当前阶段仍是 MVP 模拟生成，不调用 Python/LangChain AI 引擎，也不使用 RabbitMQ 异步队列。
+- 当前还没有 Phase 8 的全局异常处理，因此不存在、越权、参数校验失败等错误会在后续阶段统一整理为更稳定的 JSON 错误响应。
+- `GET /api/story/list` 返回的是 MyBatis-Plus 分页对象，前端 Phase 12 可以读取其中的 `records`、`current`、`size`、`total` 等字段。
