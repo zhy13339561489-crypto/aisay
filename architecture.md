@@ -355,3 +355,60 @@ sequenceDiagram
 - 权限校验放在服务层，避免不同入口重复实现归属判断。
 - DTO 不暴露数据库内部统计字段之外的敏感信息，详情页只返回前端当前阶段需要的故事、角色和场景。
 - 当前生成内容是固定模拟数据，后续接入 AI 引擎时可以保持 Controller 契约不变，只替换 `StoryServiceImpl.generateStory` 内部编排逻辑。
+
+## 文件存储与异常处理模块
+
+Phase 8 新增本地文件存储和统一异常处理。文件服务把上传文件落到后端本地 `storage` 目录，返回相对路径和 API URL；异常处理把参数错误、越权、资源不存在、文件错误和兜底错误统一包装成 `ApiResponse`。
+
+```mermaid
+flowchart LR
+    Client["前端 / API 调用方"]
+    FileController["FileController"]
+    StorageUtil["LocalFileStorageUtil"]
+    Storage["backend/storage"]
+    ExceptionHandler["GlobalExceptionHandler"]
+    ErrorController["ApiErrorController"]
+
+    Client -->|POST /api/files/upload| FileController
+    Client -->|GET /api/files/{category}/{date}/{filename}| FileController
+    Client -->|DELETE /api/files/{category}/{date}/{filename}| FileController
+    FileController --> StorageUtil
+    StorageUtil --> Storage
+    FileController -.异常.-> ExceptionHandler
+    Client -->|未知接口 /error| ErrorController
+```
+
+文件服务职责：
+
+- `StorageConfig` 负责读取 `storage.root-path`、`storage.max-file-size`、`storage.max-request-size`，并创建 `LocalFileStorageUtil` Bean。
+- `LocalFileStorageUtil` 负责文件保存、读取、删除、URL 生成和路径安全校验。
+- `FileController` 负责 HTTP multipart 上传、资源读取和删除接口。
+- `FileUploadResponse` 作为上传响应 DTO，承载 `originalFilename`、`filePath`、`fileUrl`、`size`、`contentType`。
+
+文件路径规则：
+
+- 根目录默认是后端工作目录下的 `./storage`。
+- 保存路径为 `{category}/{yyyy-MM-dd}/{uuid.ext}`，例如 `resources/2026-05-17/xxxx.png`。
+- 当前分类名只允许字母、数字、下划线和短横线，避免把用户输入直接变成任意目录。
+- 当前扩展名白名单为 `jpg`、`jpeg`、`png`、`gif`、`bmp`、`pdf`、`epub`。
+- 读取和删除文件前会做路径规范化，并确保最终路径仍在 `storage` 根目录内。
+
+异常处理职责：
+
+- `GlobalExceptionHandler` 处理 Controller 和 Service 抛出的业务异常、参数校验异常、multipart 异常、文件 IO 异常和未知异常。
+- `ApiErrorController` 处理 Spring Boot 错误转发，保证未知接口也返回统一 JSON。
+- `SecurityConfig` 放行 `/error`，避免错误转发被认证流程抢先变成 401。
+
+统一响应约定：
+
+- 参数校验失败返回 HTTP 400，响应体 `code=400`，字段级错误放在 `data` 中。
+- 越权访问返回 HTTP 403，响应体 `code=403`。
+- 资源不存在或接口不存在返回 HTTP 404，响应体 `code=404`。
+- 未认证请求仍由 Spring Security entry point 返回 HTTP 401 JSON。
+- 未预期异常返回 HTTP 500，避免把堆栈信息暴露给前端。
+
+设计约束：
+
+- 当前所有 `/api/files/**` 接口都沿用 JWT 认证规则；如果后续封面图需要公开展示，可以仅放行 `GET /api/files/**`，上传和删除继续要求认证。
+- 当前文件元数据不单独入库，由业务字段保存返回的 `filePath` 或 `fileUrl`；例如用户头像可写入 `users.avatar_path`，漫剧封面可写入 `stories.cover_image_path`。
+- 本地文件存储适合 MVP 和单机开发，后续如迁移到 MinIO/对象存储，可以保留 Controller 响应契约，只替换 `LocalFileStorageUtil` 的实现。

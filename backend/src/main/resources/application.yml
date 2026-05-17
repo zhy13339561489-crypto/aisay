@@ -44,3 +44,8 @@ knife4j:
 jwt:
   secret: aisay-manga-local-development-secret-key-please-change-in-production
   expiration: 86400000
+
+storage:
+  root-path: ./storage
+  max-file-size: 10MB
+  max-request-size: 50MB

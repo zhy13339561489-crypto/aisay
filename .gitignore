@@ -1,6 +1,7 @@
 .m2/
 backend/mvn_repo/
 backend/backend-start*.log
+backend/storage/
 frontend/node_modules/
 frontend/dist/
 frontend/.npm-cache/

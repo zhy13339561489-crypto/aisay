@@ -402,3 +402,66 @@
 - 当前阶段仍是 MVP 模拟生成，不调用 Python/LangChain AI 引擎，也不使用 RabbitMQ 异步队列。
 - 当前还没有 Phase 8 的全局异常处理，因此不存在、越权、参数校验失败等错误会在后续阶段统一整理为更稳定的 JSON 错误响应。
 - `GET /api/story/list` 返回的是 MyBatis-Plus 分页对象，前端 Phase 12 可以读取其中的 `records`、`current`、`size`、`total` 等字段。
+
+## 2026-05-17 Phase 8：后端文件存储与全局异常处理
+
+### Step 8.1 本地文件存储工具
+
+- [x] 新增 `config/StorageConfig.java`，集中配置本地存储根目录、最大单文件大小和最大请求大小。
+- [x] 在 `application.yml` 新增 `storage.root-path=./storage`、`storage.max-file-size=10MB`、`storage.max-request-size=50MB`。
+- [x] 新增 `utils/LocalFileStorageUtil.java`，实现 `saveFile`、`loadFile`、`deleteFile`、`getFileUrl`。
+- [x] 文件保存时使用 UUID 重命名，目录结构为 `{category}/{yyyy-MM-dd}/{uuid.ext}`。
+- [x] 文件校验包含空文件检查、大小限制、扩展名白名单、Content-Type 白名单、分类名校验、日期路径校验、文件名路径穿越检查。
+- [x] 默认允许扩展名：`jpg`、`jpeg`、`png`、`gif`、`bmp`、`pdf`、`epub`。
+- [x] 新增 `dto/response/FileUploadResponse.java`，上传后返回原始文件名、相对路径、访问 URL、大小、Content-Type。
+- [x] 新增 `controller/FileController.java`。
+- [x] 实现 `POST /api/files/upload`，通过 multipart 表单上传文件，默认分类为 `resources`。
+- [x] 实现 `GET /api/files/{category}/{date}/{filename}`，读取本地文件并以内联资源返回。
+- [x] 实现 `DELETE /api/files/{category}/{date}/{filename}`，删除本地文件。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+- [x] `mvn -gs ..\settings.phase1.xml test` 成功；共 5 个测试，4 个执行通过，1 个真实 MySQL Mapper 测试默认跳过。
+- [x] 使用 `--server.port=8099` 做短启动烟测成功，Tomcat、Spring Security FilterChain、WebSocket broker 均正常启动。
+- [ ] 未执行真实文件上传 curl，因为该接口默认需要有效 JWT token，且需要你提供本地测试文件。
+
+### Step 8.2 全局异常处理
+
+- [x] 新增 `config/GlobalExceptionHandler.java`。
+- [x] `MethodArgumentNotValidException` 返回 HTTP 400，并在 `data` 中返回字段级校验错误。
+- [x] `ConstraintViolationException` 返回 HTTP 400，并在 `data` 中返回参数级校验错误。
+- [x] `IllegalArgumentException`、multipart 参数缺失、上传大小超限等请求错误返回 HTTP 400。
+- [x] `AccessDeniedException` 返回 HTTP 403。
+- [x] `NoSuchElementException` 返回 HTTP 404。
+- [x] `NoHandlerFoundException` 和 `NoResourceFoundException` 返回 HTTP 404，消息为 `接口不存在`。
+- [x] 文件 IO 异常返回 HTTP 500，消息为 `文件处理失败`。
+- [x] 其他未预期异常返回 HTTP 500，统一使用 `ApiResponse`。
+- [x] 新增 `controller/ApiErrorController.java`，兜底 `/error`，避免 Spring Boot 默认错误页破坏统一响应格式。
+- [x] 在 `SecurityConfig` 放行 `/error`，确保错误转发不会被认证拦截。
+
+验证结果：
+
+- [x] 访问不存在接口 `GET /api/auth/not-exist` 返回 HTTP 404 JSON：`{"code":404,"message":"接口不存在","data":null,...}`。
+- [x] 未带 token 访问受保护接口仍返回 HTTP 401 JSON，原有安全测试通过。
+
+需要你做的事：
+
+- [ ] 如果还没有执行 Phase 2 的 SQL，请先在 MySQL 中执行 `backend/src/main/resources/db/init.sql`；文件上传本身不依赖数据库，但完整联调仍需要用户登录和 token。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 通过注册/登录接口获取 `<token>`。
+- [ ] 准备一个本地测试文件，例如 `F:\ai\aisay\test.png`，文件扩展名需在白名单内且不超过 10MB。
+- [ ] 上传文件：
+  `curl -X POST http://localhost:8085/api/files/upload -H "Authorization: Bearer <token>" -F "file=@F:\ai\aisay\test.png" -F "category=resources"`
+- [ ] 上传成功后，响应中的 `filePath` 类似 `resources/2026-05-17/<uuid>.png`，`fileUrl` 类似 `/api/files/resources/2026-05-17/<uuid>.png`。
+- [ ] 访问文件：
+  `curl http://localhost:8085/api/files/resources/2026-05-17/<uuid>.png -H "Authorization: Bearer <token>"`
+- [ ] 删除文件：
+  `curl -X DELETE http://localhost:8085/api/files/resources/2026-05-17/<uuid>.png -H "Authorization: Bearer <token>"`
+- [ ] 如果正式运行时再次遇到 `8085` 端口占用，请先确认是否已有后端窗口正在运行；不要同时启动两个后端实例。
+
+说明：
+
+- 当前 `/api/files/**` 沿用全局安全规则，上传、访问、删除都需要 JWT token；后续如果希望封面图公开访问，可以在安全配置中单独放行 GET 文件接口。
+- 文件默认保存在后端工作目录下的 `storage` 目录中，应用启动时会自动创建 `storage`、`avatars`、`resources`、`covers` 基础目录。
+- 当前文件记录未写入数据库，只返回路径给前端或业务模块保存；后续头像、封面图等字段可以直接保存 `filePath` 或 `fileUrl`。
