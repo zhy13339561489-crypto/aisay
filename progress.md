@@ -506,7 +506,7 @@
 - [x] 布局使用 `<RouterView />` 承载受保护页面内容。
 - [x] 布局已做移动端适配，窄屏下导航会换行。
 - [x] 新增阶段九占位页面：`ChatView.vue`、`StoryList.vue`、`StoryDetailView.vue`、`UserCenter.vue`、`LoginView.vue`、`RegisterView.vue`。
-- [x] `LoginView.vue` 提供临时本地登录按钮，写入 `phase-9-local-token`，用于在 Phase 10 真实认证接入前验证路由守卫和布局。
+- [x] `LoginView.vue` 在 Phase 9 曾提供临时本地登录按钮；Phase 10 已替换为真实 `userStore.login()`。
 
 需要你做的事：
 
@@ -517,10 +517,76 @@
 - [ ] 点击顶部导航的 `对话`、`漫剧列表`，确认路由切换正常。
 - [ ] 点击右上角用户菜单的 `个人中心`，确认跳转 `/user`。
 - [ ] 点击右上角用户菜单的 `退出登录`，确认清理 token 并回到 `/login`。
-- [ ] Phase 10 开始接入真实登录后，请把 `LoginView.vue` 中的临时本地登录逻辑替换为真实 `userStore.login()`。
+- [x] Phase 10 已将 `LoginView.vue` 中的临时本地登录逻辑替换为真实 `userStore.login()`。
 
 说明：
 
 - 阶段九只实现路由与基础布局，不调用后端接口；MySQL、Redis、RabbitMQ 在线状态不会影响本阶段构建。
 - 当前登录判断使用 `localStorage.getItem("token")`，这是为了和后续 Phase 10 的用户 Store 持久化策略保持一致。
 - 当前页面是可编译占位页，真实聊天、漫剧列表、漫剧详情、用户中心内容会在 Phase 10 到 Phase 13 继续填充。
+
+## 2026-05-17 Phase 10：前端认证模块
+
+### Step 10.1 API 层与 Axios 封装
+
+- [x] 新增 `frontend/src/api/index.ts`，创建统一 Axios 实例。
+- [x] Axios `baseURL` 保持为空，继续走 Vite `/api` 代理转发到后端。
+- [x] Axios 超时时间设置为 `15000ms`。
+- [x] 请求拦截器会从 `localStorage.token` 读取 JWT，并注入 `Authorization: Bearer <token>`。
+- [x] 响应拦截器处理 HTTP 401：清理 `token` 和 `userInfo`，跳转 `/login?redirect=<当前路径>`，并提示重新登录。
+- [x] 响应拦截器处理其他错误：读取后端 `ApiResponse.message` 并通过 Element Plus `ElMessage` 展示。
+- [x] 新增 `frontend/src/types/auth.ts`，定义 `ApiResponse`、登录/注册请求、登录响应、用户资料响应和资料更新请求类型。
+
+验证结果：
+
+- [x] `npm run build` 成功，`vue-tsc` 类型检查和 Vite 生产构建均通过。
+- [x] `npm run dev -- --host 127.0.0.1` 短启动烟测成功，访问 `http://127.0.0.1:8080/login` 返回 HTTP 200。
+- [ ] 未执行真实浏览器注册/登录联调，因为需要你先确认数据库 SQL 已执行并启动后端。
+
+### Step 10.2 Auth API 与 User Store
+
+- [x] 新增 `frontend/src/api/authApi.ts`。
+- [x] 实现 `register(data)`，调用 `POST /api/auth/register`。
+- [x] 实现 `login(data)`，调用 `POST /api/auth/login`。
+- [x] 实现 `getProfile()`，调用 `GET /api/user/profile`。
+- [x] 实现 `updateProfile(data)`，调用 `PUT /api/user/profile`。
+- [x] 新增 `frontend/src/stores/userStore.ts`。
+- [x] Store state 包含 `token`、`userInfo`、`isLoggedIn`。
+- [x] Store actions 包含 `login`、`register`、`fetchProfile`、`updateProfile`、`logout`。
+- [x] Store 会从 `localStorage` 初始化 token 和用户资料，并在登录、更新资料、退出登录时同步持久化。
+- [x] 登录成功后会先保存 JWT，再调用 `getProfile()` 拉取完整用户资料；如果资料拉取失败，会清理 token，避免伪登录态。
+- [x] `AppLayout.vue` 已改为使用 `userStore` 展示用户名和处理退出登录。
+
+### Step 10.3 登录/注册页面
+
+- [x] `LoginView.vue` 已从阶段九临时 token 写入逻辑改为真实 `userStore.login()`。
+- [x] 登录表单包含用户名和密码。
+- [x] 登录表单校验：用户名必填且 3-50 字符，密码必填且 6-100 字符。
+- [x] 登录成功后会跳转到 `redirect` 参数指定页面，默认 `/chat`。
+- [x] `RegisterView.vue` 已接入真实 `userStore.register()`。
+- [x] 注册表单包含用户名、邮箱、密码、确认密码。
+- [x] 注册表单校验：用户名长度、邮箱格式、密码长度、确认密码一致。
+- [x] 注册成功后提示成功并跳转 `/login`。
+
+构建提示：
+
+- [ ] Vite 仍提示主 chunk 大于 500KB，主要来自当前阶段全量引入 Element Plus；后续可用按需引入或手动分包优化。
+- [ ] Dart Sass 仍输出 legacy JS API deprecation warning，这是依赖链提示，不影响构建结果。
+- [ ] Rollup 仍对 `@vueuse/core` 的 `#__PURE__` 注释位置给出提示，不影响构建结果。
+
+需要你做的事：
+
+- [ ] 如果还没有执行 Phase 2 的 SQL，请先在 MySQL 中执行 `backend/src/main/resources/db/init.sql`，否则注册/登录会因为 `users` 表不存在而失败。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 启动前端：在 `frontend` 目录运行 `npm run dev`，访问 `http://localhost:8080`。
+- [ ] 打开 `http://localhost:8080/register`，填写用户名、邮箱、密码和确认密码，验证注册成功后跳转登录页。
+- [ ] 打开 `http://localhost:8080/login`，使用刚注册的用户名和密码登录。
+- [ ] 登录成功后打开浏览器 DevTools Network，确认后续请求头包含 `Authorization: Bearer <token>`。
+- [ ] 登录后访问 `http://localhost:8080/user`，确认不会被路由守卫踢回登录页。
+- [ ] 点击右上角 `退出登录`，确认 `localStorage.token` 和 `localStorage.userInfo` 被清理，并跳转 `/login`。
+
+说明：
+
+- 阶段十只实现前端认证，不新增后端接口；它依赖 Phase 5 已完成的 `/api/auth/register`、`/api/auth/login`、`/api/user/profile`、`/api/user/profile` 更新接口。
+- 当前前端登录使用用户名而不是邮箱，与后端 `LoginRequest` 保持一致。
+- 当前注册成功后不会自动登录，因为后端注册接口返回的是用户资料而非 JWT；用户需要跳转登录页再登录。

@@ -37,22 +37,12 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { useRouter } from 'vue-router';
+import { useUserStore } from '../../stores/userStore';
 
 const router = useRouter();
+const userStore = useUserStore();
 
-const username = computed(() => {
-  const rawUser = localStorage.getItem('userInfo');
-  if (!rawUser) {
-    return '创作者';
-  }
-
-  try {
-    const user = JSON.parse(rawUser) as { username?: string };
-    return user.username || '创作者';
-  } catch {
-    return '创作者';
-  }
-});
+const username = computed(() => userStore.userInfo?.username || '创作者');
 
 const usernameInitial = computed(() => username.value.slice(0, 1).toUpperCase());
 
@@ -63,8 +53,7 @@ function handleUserCommand(command: string) {
   }
 
   if (command === 'logout') {
-    localStorage.removeItem('token');
-    localStorage.removeItem('userInfo');
+    userStore.logout();
     router.push('/login');
   }
 }

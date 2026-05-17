@@ -477,3 +477,81 @@ flowchart LR
 - 阶段九不直接调用后端 API，避免把路由布局工作和认证业务耦合在一起。
 - 当前临时 token 仅用于本地路由验证，不代表真实认证；Phase 10 必须替换为 `POST /api/auth/login` 返回的 JWT。
 - 视觉层保留明确的品牌感和响应式布局，但不抢占后续聊天、漫剧列表、用户中心的业务组件设计空间。
+
+## 前端认证模块
+
+Phase 10 在前端补齐认证 API、Axios 拦截器、用户 Store，以及真实登录/注册表单。该模块把后端 Phase 5 的 JWT 认证接口接入前端路由体系，为后续聊天、漫剧和用户中心页面提供统一登录态。
+
+```mermaid
+flowchart LR
+    LoginView["LoginView / RegisterView"]
+    UserStore["userStore"]
+    AuthApi["authApi"]
+    Axios["Axios request"]
+    Backend["Spring Boot /api"]
+    Storage["localStorage"]
+    Router["Vue Router Guard"]
+    Layout["AppLayout"]
+
+    LoginView --> UserStore
+    UserStore --> AuthApi
+    AuthApi --> Axios
+    Axios -->|/api/auth/login 等| Backend
+    UserStore --> Storage
+    Axios -->|Authorization: Bearer token| Backend
+    Router --> Storage
+    Layout --> UserStore
+```
+
+API 层职责：
+
+- `api/index.ts` 创建统一 Axios 实例，`baseURL` 为空，由 Vite 代理把 `/api` 转发到后端 `8085`。
+- 请求拦截器从 `localStorage.token` 读取 JWT，并注入 `Authorization: Bearer <token>`。
+- 响应拦截器处理 401：清理本地登录态、跳转登录页、保留当前路径到 `redirect`。
+- 响应拦截器处理非 401 错误：优先显示后端 `ApiResponse.message`。
+- `api/authApi.ts` 封装注册、登录、获取资料、更新资料接口，页面和 Store 不直接写 URL。
+
+用户状态职责：
+
+- `stores/userStore.ts` 维护 `token`、`userInfo`、`isLoggedIn`。
+- Store 初始化时从 `localStorage` 恢复登录态，保证刷新页面后仍可保留登录状态。
+- `login` action 会调用后端登录接口获取 JWT，再调用 `getProfile` 获取完整用户资料。
+- `register` action 调用注册接口但不自动登录，因为当前后端注册接口不返回 JWT。
+- `logout` action 清理 Store 与 `localStorage`，供布局菜单和 401 拦截复用。
+
+页面职责：
+
+- `LoginView` 负责用户名/密码表单校验、调用 `userStore.login()`、登录成功后跳转 `redirect` 或 `/chat`。
+- `RegisterView` 负责用户名/邮箱/密码/确认密码表单校验、调用 `userStore.register()`、注册成功后跳转 `/login`。
+- `AppLayout` 从 `userStore.userInfo` 读取用户名，并通过 `userStore.logout()` 退出登录。
+
+认证流：
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant Login as LoginView
+    participant Store as userStore
+    participant Api as authApi/Axios
+    participant Backend as 后端认证接口
+    participant Storage as localStorage
+    participant Router as Vue Router
+
+    User->>Login: 输入用户名和密码
+    Login->>Store: login(username, password)
+    Store->>Api: POST /api/auth/login
+    Api->>Backend: 登录请求
+    Backend-->>Api: JWT
+    Store->>Storage: 保存 token
+    Store->>Api: GET /api/user/profile
+    Backend-->>Store: 用户资料
+    Store->>Storage: 保存 userInfo
+    Login->>Router: 跳转 redirect 或 /chat
+```
+
+设计约束：
+
+- 路由守卫当前仍以 `localStorage.token` 作为最小登录态判断，避免在守卫初始化阶段引入 Pinia 安装顺序问题。
+- 后续如果要做更严格的登录态校验，可以在受保护布局加载时调用 `userStore.fetchProfile()`，失败则退出登录。
+- Token 只存储在浏览器 `localStorage`，适合当前 MVP；如果后续需要更高安全等级，可改为 HttpOnly Cookie 或增加刷新令牌机制。
+- 前端只负责展示后端返回的错误消息，不在浏览器侧推断用户名重复、密码错误等业务原因。

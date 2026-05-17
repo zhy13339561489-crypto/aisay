@@ -3,13 +3,31 @@
     <section class="auth-card">
       <p class="eyebrow">Welcome Back</p>
       <h1>登录创作台</h1>
-      <p>阶段十会接入真实登录接口。当前可先写入临时 token，方便验证阶段九的路由守卫。</p>
+      <p>使用后端真实登录接口获取 JWT，进入你的 AI 漫剧创作空间。</p>
 
-      <el-form label-position="top" @submit.prevent>
-        <el-form-item label="临时用户名">
-          <el-input v-model="username" placeholder="例如：test" />
+      <el-form
+        ref="formRef"
+        :model="form"
+        :rules="rules"
+        label-position="top"
+        @submit.prevent
+      >
+        <el-form-item label="用户名" prop="username">
+          <el-input v-model.trim="form.username" placeholder="请输入用户名" autocomplete="username" />
         </el-form-item>
-        <el-button type="primary" size="large" @click="mockLogin">进入系统</el-button>
+        <el-form-item label="密码" prop="password">
+          <el-input
+            v-model="form.password"
+            type="password"
+            placeholder="请输入密码"
+            autocomplete="current-password"
+            show-password
+            @keyup.enter="handleLogin"
+          />
+        </el-form-item>
+        <el-button type="primary" size="large" :loading="isSubmitting" @click="handleLogin">
+          登录
+        </el-button>
       </el-form>
 
       <RouterLink class="switch-link" to="/register">还没有账号？去注册</RouterLink>
@@ -18,18 +36,58 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { reactive, ref } from 'vue';
+import { ElMessage, type FormInstance, type FormRules } from 'element-plus';
 import { useRoute, useRouter } from 'vue-router';
+import { useUserStore } from '../stores/userStore';
+
+interface LoginForm {
+  username: string;
+  password: string;
+}
 
 const route = useRoute();
 const router = useRouter();
-const username = ref('创作者');
+const userStore = useUserStore();
+const formRef = ref<FormInstance>();
+const isSubmitting = ref(false);
 
-function mockLogin() {
-  localStorage.setItem('token', 'phase-9-local-token');
-  localStorage.setItem('userInfo', JSON.stringify({ username: username.value || '创作者' }));
-  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/chat';
-  router.push(redirect);
+const form = reactive<LoginForm>({
+  username: '',
+  password: '',
+});
+
+const rules: FormRules<LoginForm> = {
+  username: [
+    { required: true, message: '请输入用户名', trigger: 'blur' },
+    { min: 3, max: 50, message: '用户名长度应为 3-50 个字符', trigger: 'blur' },
+  ],
+  password: [
+    { required: true, message: '请输入密码', trigger: 'blur' },
+    { min: 6, max: 100, message: '密码长度应为 6-100 个字符', trigger: 'blur' },
+  ],
+};
+
+async function handleLogin() {
+  if (!formRef.value) {
+    return;
+  }
+
+  await formRef.value.validate(async (valid) => {
+    if (!valid) {
+      return;
+    }
+
+    isSubmitting.value = true;
+    try {
+      await userStore.login(form.username, form.password);
+      ElMessage.success('登录成功');
+      const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/chat';
+      router.push(redirect);
+    } finally {
+      isSubmitting.value = false;
+    }
+  });
 }
 </script>
 
@@ -70,6 +128,10 @@ h1 {
 p {
   color: #475569;
   line-height: 1.8;
+}
+
+.el-button {
+  width: 100%;
 }
 
 .switch-link {
