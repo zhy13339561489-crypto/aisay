@@ -590,3 +590,147 @@
 - 阶段十只实现前端认证，不新增后端接口；它依赖 Phase 5 已完成的 `/api/auth/register`、`/api/auth/login`、`/api/user/profile`、`/api/user/profile` 更新接口。
 - 当前前端登录使用用户名而不是邮箱，与后端 `LoginRequest` 保持一致。
 - 当前注册成功后不会自动登录，因为后端注册接口返回的是用户资料而非 JWT；用户需要跳转登录页再登录。
+
+## 2026-05-17 Phase 11：前端聊天核心功能
+
+### Step 11.1 Chat API 与 Chat Store
+
+- [x] 新增 `frontend/src/types/chat.ts`，定义 `ChatSessionResponse`、`MessageResponse`、`ChatStartRequest`、`SendMessageRequest`。
+- [x] 新增 `frontend/src/api/chatApi.ts`。
+- [x] 实现 `startSession(title?)`，调用 `POST /api/chat/start`。
+- [x] 实现 `sendMessage(sessionId, content)`，调用 `POST /api/chat/message`。
+- [x] 实现 `getHistory(sessionId)`，调用 `GET /api/chat/history/{sessionId}`。
+- [x] 实现 `getSessions()`，调用 `GET /api/chat/sessions`。
+- [x] 实现 `deleteSession(sessionId)`，调用 `DELETE /api/chat/session/{sessionId}`。
+- [x] 新增 `frontend/src/stores/chatStore.ts`。
+- [x] Store state 包含 `currentSessionId`、`sessions`、`messages`、`isLoading`、`isSending`、`isConnected`。
+- [x] Store actions 包含 `startNewSession`、`switchSession`、`sendMessage`、`loadHistory`、`loadSessions`、`deleteSession`、`connectWebSocket`、`disconnectWebSocket`。
+- [x] `sendMessage` 会先在前端追加乐观用户消息，再调用 HTTP 接口获取 AI 固定回复并追加到消息列表。
+
+验证结果：
+
+- [x] `npm run build` 成功，`vue-tsc` 类型检查和 Vite 构建均通过。
+- [x] `npm run dev -- --host 127.0.0.1` 短启动烟测成功，访问 `http://127.0.0.1:8080/chat` 返回 HTTP 200。
+- [ ] 未执行真实聊天接口联调，因为需要你确认 Phase 2 SQL 已执行、后端已启动，并用真实账号登录获取 token。
+
+### Step 11.2 消息气泡组件
+
+- [x] 新增 `frontend/src/components/chat/MessageBubble.vue`。
+- [x] 支持 `role`、`content`、`timestamp` props。
+- [x] 用户消息右对齐，AI 消息左对齐。
+- [x] 用户与 AI 使用不同头像标识、颜色和气泡圆角。
+- [x] 使用 `dayjs` 格式化消息时间。
+- [x] 使用 `markdown-it` 渲染 Markdown，且关闭 HTML 解析以降低 XSS 风险。
+
+### Step 11.3 输入区域组件
+
+- [x] 新增 `frontend/src/components/chat/InputArea.vue`。
+- [x] 使用 Element Plus `el-input` textarea。
+- [x] 支持 Enter 发送、Shift+Enter 换行。
+- [x] 发送中会展示 loading，输入框和按钮会禁用。
+- [x] 发送后自动清空输入框。
+- [x] 通过 `send` 事件向父组件传递文本内容。
+
+### Step 11.4 会话列表组件
+
+- [x] 新增 `frontend/src/components/chat/SessionList.vue`。
+- [x] 左侧列表展示所有会话标题和最后活跃时间。
+- [x] 提供“新建对话”按钮。
+- [x] 当前会话高亮。
+- [x] 每个会话提供删除入口，并通过事件交给父组件确认。
+- [x] 支持 `create`、`select`、`delete` 事件。
+
+### Step 11.5 对话主页 ChatView
+
+- [x] 重写 `frontend/src/views/ChatView.vue`，从阶段九占位页升级为真实聊天主页面。
+- [x] 左侧为 `SessionList`，右侧为消息列表和输入区。
+- [x] 支持无会话欢迎页。
+- [x] 支持从 `/chat/:sessionId` 路由参数自动加载对应会话历史。
+- [x] 新建会话后自动跳转 `/chat/{sessionId}`。
+- [x] 切换会话时加载历史消息。
+- [x] 删除当前会话后回到 `/chat`。
+- [x] 消息列表在新增消息后自动滚动到底部。
+- [x] 移动端布局会从左右两栏切换为上下布局。
+
+### Step 11.6 WebSocket 集成
+
+- [x] `chatStore` 集成 `SockJS + STOMP.js`。
+- [x] 创建或切换会话时连接 `/ws/chat`。
+- [x] 订阅 `/topic/chat/{sessionId}`。
+- [x] STOMP `CONNECT` header 会携带 `Authorization: Bearer <token>`。
+- [x] 收到服务端推送的 `ApiResponse<MessageResponse>` 后，会把当前会话的消息追加到 `messages`。
+- [x] 组件卸载或删除当前会话时会断开 WebSocket。
+- [x] 当前发送消息仍优先使用 HTTP 接口，确保与后端 Phase 6 的固定 AI 回复接口保持一致；WebSocket 作为实时推送通道已预留并可接收服务端推送。
+
+构建提示：
+
+- [ ] Vite 仍提示主 chunk 大于 500KB，主要来自 Element Plus 全量引入；后续可做按需引入或 manualChunks。
+- [ ] Dart Sass 仍输出 legacy JS API deprecation warning，这是依赖链提示，不影响构建结果。
+- [ ] Rollup 仍对 `@vueuse/core` 的 `#__PURE__` 注释位置给出提示，不影响构建结果。
+
+需要你做的事：
+
+- [ ] 如果还没有执行 Phase 2 的 SQL，请先在 MySQL 中执行 `backend/src/main/resources/db/init.sql`，否则注册、登录、会话和消息接口会失败。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 启动前端：在 `frontend` 目录运行 `npm run dev`，访问 `http://localhost:8080`。
+- [ ] 如果还没有账号，请先访问 `/register` 注册，再访问 `/login` 登录。
+- [ ] 登录后访问 `/chat`，点击左侧 `+` 创建新会话。
+- [ ] 在输入框发送 `你好`，应看到右侧出现用户消息和后端固定 AI 回复。
+- [ ] 刷新页面或访问 `/chat/{sessionId}`，应能加载该会话历史。
+- [ ] 点击左侧会话切换不同对话，确认消息列表随会话变化。
+- [ ] 点击会话上的 `删除`，确认删除后列表刷新，当前会话删除后回到 `/chat`。
+- [ ] 如需验证 WebSocket，请打开浏览器 DevTools Network 的 WS 面板，确认连接 `/ws/chat`，并观察 STOMP 订阅 `/topic/chat/{sessionId}`。
+
+说明：
+
+- 阶段十一仍使用后端 Phase 6 的固定 AI 回复，不接入真实 AI 引擎。
+- HTTP 发送和 WebSocket 推送共用同一后端业务模型；当前前端发送选择 HTTP 是为了避免重复追加用户消息和 AI 消息。
+- `markdown-it` 已关闭 HTML 渲染，用户输入中的 Markdown 会被渲染，但原始 HTML 不会执行。
+
+## 2026-05-17 前端空白页与登录跳转问题排查
+
+### 问题现象
+
+- [x] 旧浏览器访问 `http://localhost:8080/` 时出现空白页。
+- [x] 更换新浏览器后页面可以正常显示登录页。
+- [x] 登录后地址停留在 `http://localhost:8080/login?redirect=/chat`，没有正常进入聊天页。
+
+### 排查结论
+
+- [x] `HTTP 304 Not Modified` 属于浏览器缓存协商结果，不是前端空白页错误。
+- [x] `Deprecation Warning [legacy-js-api]` 是 Sass 依赖链弃用提醒，不影响 Vite 构建和页面运行。
+- [x] 当前前端构建通过，说明不是 TypeScript 或 Vite 编译失败导致的白屏。
+- [x] 空白页只在旧浏览器出现，而新浏览器正常，优先判断为旧浏览器缓存了历史错误模块、旧 HMR 状态或旧 `localStorage` 登录态。
+- [x] 登录不跳转的可疑点定位到 `userStore.login()`：原逻辑在登录接口返回 token 后，会继续请求 `/api/user/profile`；如果资料接口异常，会清理 token 并抛错，页面就会停留在 `/login?redirect=/chat`。
+
+### 已完成修复
+
+- [x] 更新 `frontend/src/stores/userStore.ts`：登录接口成功后先保存 JWT 和基础用户信息，随后再尝试拉取完整 profile。
+- [x] 如果 `/api/user/profile` 返回 401，仍会清理登录态并留在登录页，避免无效 token 进入系统。
+- [x] 如果 `/api/user/profile` 出现非 401 异常，不再阻断登录跳转，用户可以先进入系统，后续再由用户中心或接口错误提示暴露问题。
+- [x] 更新 `frontend/src/views/LoginView.vue`：登录失败时在表单内显示明确错误信息，避免只看到页面没有跳转。
+- [x] 再次更新 `frontend/src/views/LoginView.vue`：登录成功后改用 Promise 表单校验、`router.replace()` 等待导航完成，并增加 `window.location.assign()` 兜底跳转。
+- [x] 登录按钮增加 `native-type="button"`，避免浏览器原生表单提交行为干扰 SPA 路由跳转。
+- [x] 更新 `frontend/src/router/index.ts`：路由守卫会解析 JWT 过期时间，发现过期 token 时自动清理 `localStorage` 并跳转登录页。
+- [x] 更新 `/` 根路径重定向逻辑：有有效 token 时进入 `/chat`，无 token 或 token 过期时进入 `/login`。
+- [x] 更新 `frontend/src/views/ChatView.vue`：聊天页加载会话或发送消息失败时显示错误提示和“重新加载”按钮，不再只留下空白页面。
+- [x] 更新 `frontend/src/stores/chatStore.ts`：会话列表和消息历史接口返回异常结构时兜底为空数组，避免组件渲染崩溃。
+- [x] 更新 `frontend/vite.config.ts` 和 `frontend/index.html`：开发环境响应增加 `no-store` 缓存策略，降低旧浏览器继续使用旧模块导致白屏的概率。
+
+### 验证结果
+
+- [x] `npm run build` 成功。
+- [x] 修复登录跳转兜底后再次执行 `npm run build` 成功。
+- [x] 修复 `/chat` 白屏与缓存策略后再次执行 `npm run build` 成功。
+- [x] 构建仍出现 Sass legacy JS API deprecation warning，这是非阻断警告。
+- [x] 构建仍出现 Element Plus 主 chunk 体积提示，这是性能优化提示，不影响当前功能。
+
+### 需要你做的事
+
+- [ ] 停止当前前端开发服务并重新运行 `npm run dev`，否则 `vite.config.ts` 中新增的缓存响应头不会生效。
+- [ ] 在出现空白页的旧浏览器中清理 `localhost:8080` 的站点数据，或在控制台执行 `localStorage.clear(); sessionStorage.clear(); location.reload();`。
+- [ ] 清理后按 `Ctrl + F5` 强制刷新页面，避免继续使用旧缓存。
+- [ ] 如果登录仍不跳转，请打开浏览器 DevTools 的 Network 面板，重新登录后检查 `POST /api/auth/login` 和 `GET /api/user/profile` 的状态码与响应内容。
+- [ ] `POST /api/auth/login` 必须返回 200 且响应中包含 token；如果不是 200，请检查用户名密码是否正确、账号是否已注册、后端是否连接到已初始化的 MySQL。
+- [ ] 如果 `GET /api/user/profile` 返回 401，说明 token 未被后端接受，需要重点检查后端 JWT 配置、后端是否重启后使用了不同密钥、请求头是否携带 `Authorization: Bearer <token>`。
+- [ ] 如果 `/chat` 页面显示错误提示，请根据提示优先确认后端 `8085` 已启动、MySQL 表已初始化、当前账号能正常调用 `GET /api/chat/sessions`。

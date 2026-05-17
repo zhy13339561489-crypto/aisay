@@ -25,7 +25,21 @@
             @keyup.enter="handleLogin"
           />
         </el-form-item>
-        <el-button type="primary" size="large" :loading="isSubmitting" @click="handleLogin">
+        <el-alert
+          v-if="loginError"
+          class="login-error"
+          :title="loginError"
+          type="error"
+          show-icon
+          :closable="false"
+        />
+        <el-button
+          type="primary"
+          size="large"
+          native-type="button"
+          :loading="isSubmitting"
+          @click="handleLogin"
+        >
           登录
         </el-button>
       </el-form>
@@ -51,6 +65,7 @@ const router = useRouter();
 const userStore = useUserStore();
 const formRef = ref<FormInstance>();
 const isSubmitting = ref(false);
+const loginError = ref('');
 
 const form = reactive<LoginForm>({
   username: '',
@@ -73,21 +88,65 @@ async function handleLogin() {
     return;
   }
 
-  await formRef.value.validate(async (valid) => {
-    if (!valid) {
-      return;
-    }
+  const valid = await formRef.value.validate().catch(() => false);
+  if (!valid) {
+    return;
+  }
 
-    isSubmitting.value = true;
-    try {
-      await userStore.login(form.username, form.password);
-      ElMessage.success('登录成功');
-      const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/chat';
-      router.push(redirect);
-    } finally {
-      isSubmitting.value = false;
-    }
-  });
+  isSubmitting.value = true;
+  loginError.value = '';
+  try {
+    await userStore.login(form.username, form.password);
+    ElMessage.success('登录成功');
+    await navigateAfterLogin();
+  } catch (error) {
+    loginError.value = getErrorMessage(error);
+  } finally {
+    isSubmitting.value = false;
+  }
+}
+
+async function navigateAfterLogin() {
+  const target = getSafeRedirectPath();
+  const resolvedTarget = router.resolve(target).fullPath;
+
+  try {
+    await router.replace(resolvedTarget);
+  } catch {
+    window.location.assign(resolvedTarget);
+    return;
+  }
+
+  if (router.currentRoute.value.fullPath !== resolvedTarget) {
+    window.location.assign(resolvedTarget);
+  }
+}
+
+function getSafeRedirectPath() {
+  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/chat';
+
+  if (!redirect.startsWith('/') || redirect.startsWith('//') || redirect.startsWith('/login')) {
+    return '/chat';
+  }
+
+  return redirect;
+}
+
+function getErrorMessage(error: unknown) {
+  if (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    (error as { response?: { data?: { message?: string } } }).response?.data?.message
+  ) {
+    return (error as { response: { data: { message: string } } }).response.data.message;
+  }
+
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return '登录失败，请检查用户名、密码或后端服务状态';
 }
 </script>
 
@@ -132,6 +191,10 @@ p {
 
 .el-button {
   width: 100%;
+}
+
+.login-error {
+  margin-bottom: 16px;
 }
 
 .switch-link {

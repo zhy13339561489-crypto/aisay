@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     port: 8080,
+    headers: {
+      'Cache-Control': 'no-store, max-age=0',
+      Pragma: 'no-cache',
+      Expires: '0',
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8085',

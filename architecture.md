@@ -543,15 +543,120 @@ sequenceDiagram
     Api->>Backend: 登录请求
     Backend-->>Api: JWT
     Store->>Storage: 保存 token
+    Store->>Storage: 保存基础 userInfo
     Store->>Api: GET /api/user/profile
-    Backend-->>Store: 用户资料
-    Store->>Storage: 保存 userInfo
+    alt profile 返回 200
+        Backend-->>Store: 用户资料
+        Store->>Storage: 覆盖保存完整 userInfo
+    else profile 返回 401
+        Store->>Storage: 清理 token 和 userInfo
+        Store-->>Login: 登录失效错误
+    else profile 非 401 异常
+        Store-->>Login: 保留 token 和基础 userInfo
+    end
     Login->>Router: 跳转 redirect 或 /chat
 ```
 
 设计约束：
 
 - 路由守卫当前仍以 `localStorage.token` 作为最小登录态判断，避免在守卫初始化阶段引入 Pinia 安装顺序问题。
+- 路由守卫会在进入受保护页面前解析 JWT `exp` 字段，发现过期 token 时主动清理本地登录态，避免旧 token 把根路径带入不可用的聊天页。
+- 根路径 `/` 会根据本地 token 是否有效决定进入 `/chat` 或 `/login`，降低旧浏览器状态残留造成白屏的概率。
+- 登录接口成功后，前端会先保存 JWT 和基础用户信息，再拉取完整 profile；这样资料接口短暂异常时不会阻断用户进入系统。
+- 如果 profile 返回 401，说明 token 无效或已过期，前端会清理登录态并停留在登录页。
 - 后续如果要做更严格的登录态校验，可以在受保护布局加载时调用 `userStore.fetchProfile()`，失败则退出登录。
 - Token 只存储在浏览器 `localStorage`，适合当前 MVP；如果后续需要更高安全等级，可改为 HttpOnly Cookie 或增加刷新令牌机制。
 - 前端只负责展示后端返回的错误消息，不在浏览器侧推断用户名重复、密码错误等业务原因。
+
+## 前端聊天模块
+
+Phase 11 在前端补齐聊天核心功能，包括 Chat API、Chat Store、消息气泡、输入区、会话列表、聊天主页和 WebSocket 订阅。该模块对接后端 Phase 6 的 `/api/chat/*` REST 接口，并预留 STOMP 实时消息通道。
+
+```mermaid
+flowchart LR
+    ChatView["ChatView"]
+    SessionList["SessionList"]
+    MessageBubble["MessageBubble"]
+    InputArea["InputArea"]
+    ChatStore["chatStore"]
+    ChatApi["chatApi"]
+    Axios["Axios request"]
+    Backend["Spring Boot /api/chat"]
+    Stomp["SockJS + STOMP"]
+    Topic["/topic/chat/{sessionId}"]
+
+    ChatView --> SessionList
+    ChatView --> MessageBubble
+    ChatView --> InputArea
+    SessionList --> ChatView
+    InputArea --> ChatView
+    ChatView --> ChatStore
+    ChatStore --> ChatApi
+    ChatApi --> Axios
+    Axios --> Backend
+    ChatStore --> Stomp
+    Stomp --> Topic
+    Topic --> ChatStore
+```
+
+API 层职责：
+
+- `api/chatApi.ts` 封装 `startSession`、`sendMessage`、`getHistory`、`getSessions`、`deleteSession`。
+- 所有请求复用 `api/index.ts` 的 Axios 实例，因此会自动携带 `Authorization: Bearer <token>`。
+- HTTP 发送消息调用 `POST /api/chat/message`，当前后端会保存用户消息并返回固定 AI 回复。
+
+Store 职责：
+
+- `stores/chatStore.ts` 维护当前会话、会话列表、消息列表、加载状态、发送状态和 WebSocket 连接状态。
+- `startNewSession` 创建会话后设置当前会话，并建立 WebSocket 订阅。
+- `switchSession` 根据会话 ID 加载历史消息，并切换 WebSocket 订阅目标。
+- `sendMessage` 会先添加乐观用户消息，再调用后端发送接口，最后追加 AI 回复。
+- `deleteSession` 删除会话后同步本地列表；如果删除的是当前会话，会清空消息并断开 WebSocket。
+- `connectWebSocket` 使用 SockJS 连接 `/ws/chat`，并通过 STOMP header 携带 JWT。
+
+组件职责：
+
+- `SessionList` 负责展示会话、创建入口、切换事件和删除事件。
+- `MessageBubble` 负责用户/AI 气泡展示、Markdown 渲染和时间格式化。
+- `InputArea` 负责输入框、发送按钮、Enter 发送、Shift+Enter 换行和发送 loading。
+- `ChatView` 负责把路由参数、Store、会话列表、消息区和输入区编排成完整聊天页面。
+
+聊天流：
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant View as ChatView
+    participant Store as chatStore
+    participant Api as chatApi/Axios
+    participant Backend as 后端 ChatController
+    participant Ws as STOMP Topic
+
+    User->>View: 点击新建会话
+    View->>Store: startNewSession()
+    Store->>Backend: POST /api/chat/start
+    Backend-->>Store: ChatSessionResponse
+    Store->>Ws: 订阅 /topic/chat/{sessionId}
+    User->>View: 输入并发送消息
+    View->>Store: sendMessage(content)
+    Store->>View: 追加乐观用户消息
+    Store->>Backend: POST /api/chat/message
+    Backend-->>Store: MessageResponse(AI)
+    Store->>View: 追加 AI 回复
+```
+
+WebSocket 约定：
+
+- 连接端点为 `/ws/chat`，通过 Vite 代理转发到后端 `8085`。
+- 订阅目标为 `/topic/chat/{sessionId}`。
+- STOMP `CONNECT` header 携带 `Authorization: Bearer <token>`，与后端 WebSocket 控制器解析逻辑一致。
+- 当前前端发送消息走 HTTP，WebSocket 主要用于接收服务端推送；这样避免 HTTP 和 WebSocket 双写造成消息重复。
+
+设计约束：
+
+- 当前 AI 回复仍来自后端固定字符串，符合 MVP 阶段边界。
+- 前端乐观消息使用负数临时 ID，只存在于当前页面内；重新加载历史时以后端消息为准。
+- Markdown 渲染关闭 HTML，降低用户输入造成 XSS 的风险。
+- WebSocket 断线不会阻塞 HTTP 聊天流程，页面会显示 `HTTP 模式`，发送和历史查询仍可用。
+- 聊天页初始化加载会话失败时会保留页面框架，并显示错误提示和重新加载入口，避免接口异常或登录态问题表现为纯白屏。
+- 开发服务通过 Vite `server.headers` 返回 `Cache-Control: no-store`，减少开发阶段浏览器复用旧模块造成的前端状态错乱。

@@ -3,7 +3,7 @@ import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 const routes: RouteRecordRaw[] = [
   {
     path: '/',
-    redirect: '/chat',
+    redirect: () => (getStoredToken() ? '/chat' : '/login'),
   },
   {
     path: '/login',
@@ -69,7 +69,7 @@ const router = createRouter({
 });
 
 router.beforeEach((to) => {
-  const token = localStorage.getItem('token');
+  const token = getStoredToken();
 
   if (to.meta.requiresAuth && !token) {
     return {
@@ -88,3 +88,46 @@ router.beforeEach((to) => {
 });
 
 export default router;
+
+function getStoredToken() {
+  const token = localStorage.getItem('token');
+  if (!token) {
+    return '';
+  }
+
+  if (isJwtExpired(token)) {
+    clearAuthStorage();
+    return '';
+  }
+
+  return token;
+}
+
+function clearAuthStorage() {
+  localStorage.removeItem('token');
+  localStorage.removeItem('userInfo');
+}
+
+function isJwtExpired(token: string) {
+  const [, payload] = token.split('.');
+  if (!payload) {
+    return false;
+  }
+
+  try {
+    const normalizedPayload = normalizeBase64Url(payload);
+    const parsed = JSON.parse(atob(normalizedPayload)) as { exp?: number };
+    if (!parsed.exp) {
+      return false;
+    }
+    return parsed.exp * 1000 <= Date.now();
+  } catch {
+    return false;
+  }
+}
+
+function normalizeBase64Url(value: string) {
+  const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
+  const paddingLength = (4 - (normalized.length % 4)) % 4;
+  return normalized + '='.repeat(paddingLength);
+}

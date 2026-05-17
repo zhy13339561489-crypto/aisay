@@ -17,6 +17,15 @@ function readStoredUser() {
   }
 }
 
+function isUnauthorized(error: unknown) {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'response' in error &&
+    (error as { response?: { status?: number } }).response?.status === 401
+  );
+}
+
 export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('token') || '');
   const userInfo = ref<UserProfileResponse | null>(readStoredUser());
@@ -39,14 +48,25 @@ export const useUserStore = defineStore('user', () => {
   async function login(username: string, password: string) {
     const loginResult = await authApi.login({ username, password });
     persistToken(loginResult.token);
+
+    persistUser({
+      id: loginResult.userId,
+      username: loginResult.username,
+      email: '',
+      createdAt: '',
+    });
+
     try {
       const profile = await authApi.getProfile();
       persistUser(profile);
-      return loginResult;
     } catch (error) {
-      logout();
-      throw error;
+      if (isUnauthorized(error)) {
+        logout();
+        throw error;
+      }
     }
+
+    return loginResult;
   }
 
   async function register(payload: RegisterRequest) {
