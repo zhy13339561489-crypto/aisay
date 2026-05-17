@@ -231,6 +231,54 @@ sequenceDiagram
 - `GET /api/user/profile` 和 `PUT /api/user/profile` 需要有效 token。
 - 当前异常响应将在 Phase 8 的全局异常处理阶段统一收口。
 
+## 聊天服务模块
+
+Phase 6 新增聊天会话、消息发送、固定 AI 回复和 WebSocket 推送能力。当前聊天服务仍是 MVP 模拟实现：后端保存用户消息后生成固定 AI 回复，不调用外部 AI 引擎。
+
+```mermaid
+flowchart LR
+    Client["前端"]
+    Rest["ChatController REST"]
+    Ws["ChatWebSocketController STOMP"]
+    Service["ChatService"]
+    SessionMapper["ChatSessionMapper"]
+    MessageMapper["MessageMapper"]
+    Broker["/topic/chat/{sessionId}"]
+
+    Client -->|HTTP /api/chat/*| Rest
+    Client -->|STOMP /app/chat.send| Ws
+    Rest --> Service
+    Ws --> Service
+    Service --> SessionMapper
+    Service --> MessageMapper
+    Ws --> Broker
+    Broker --> Client
+```
+
+REST 接口：
+
+- `POST /api/chat/start` 创建会话。
+- `POST /api/chat/message` 发送用户消息并返回 AI 固定回复。
+- `GET /api/chat/history/{sessionId}` 查询会话历史。
+- `GET /api/chat/sessions` 查询当前用户会话列表。
+- `DELETE /api/chat/session/{sessionId}` 将会话标记为 `deleted`。
+
+服务层规则：
+
+- 所有聊天操作都基于当前登录用户 ID。
+- 读取、发送、删除会话前都会校验会话归属。
+- 删除会话采用状态标记，不物理删除消息，便于后续审计或恢复策略扩展。
+- 会话创建时默认阶段为 `INITIAL`，进度为 `0`。
+- 消息角色使用 `user` 和 `ai`。
+
+WebSocket 规则：
+
+- STOMP 端点为 `/ws/chat`，SockJS 可用。
+- 应用消息前缀为 `/app`，当前发送目的地为 `/app/chat.send`。
+- 订阅目的地为 `/topic/chat/{sessionId}`。
+- 握手路径放行，但发送消息时需要在 STOMP native header 中携带 `Authorization: Bearer <token>`。
+- WebSocket 和 HTTP 共用 `ChatService.sendMessage`，避免双写不同业务逻辑。
+
 ## 后续演进
 
-Phase 6 到 Phase 8 会在后端现有包结构中继续补齐聊天、漫剧、文件与异常处理。Phase 9 之后会在前端现有目录中逐步实现路由、布局、认证、聊天、漫剧和用户中心页面。
+Phase 7 到 Phase 8 会在后端现有包结构中继续补齐漫剧、文件与异常处理。Phase 9 之后会在前端现有目录中逐步实现路由、布局、认证、聊天、漫剧和用户中心页面。

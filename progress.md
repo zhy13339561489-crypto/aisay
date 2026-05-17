@@ -270,3 +270,81 @@
 
 - 当前还没有 Phase 8 的全局异常处理，因此参数校验、用户名重复、密码错误等错误响应会在后续阶段统一美化。
 - Phase 5 已经完成认证主链路，后续聊天、漫剧、用户中心接口可以通过 `SecurityUtils.getCurrentUserId()` 获取当前用户 ID。
+
+## 2026-05-16 Phase 6：后端聊天服务
+
+### Step 6.1 聊天会话管理
+
+- [x] 创建 `service/ChatService.java`。
+- [x] 创建 `service/impl/ChatServiceImpl.java`。
+- [x] 实现 `startSession(Long userId, ChatStartRequest request)`，生成 UUID `sessionKey`，初始化 `status=active`、`currentStage=INITIAL`、`progressPercentage=0`。
+- [x] 实现 `getHistory(Long sessionId, Long userId)`，校验会话归属后按创建时间升序返回消息。
+- [x] 实现 `deleteSession(Long sessionId, Long userId)`，校验会话归属后将会话状态改为 `deleted`。
+- [x] 实现 `getUserSessions(Long userId)`，按 `lastActive` 倒序返回未删除会话。
+- [x] 创建 `controller/ChatController.java`。
+- [x] 实现 `POST /api/chat/start`。
+- [x] 实现 `GET /api/chat/history/{sessionId}`。
+- [x] 实现 `DELETE /api/chat/session/{sessionId}`。
+- [x] 实现 `GET /api/chat/sessions`。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+
+### Step 6.2 消息发送与模拟 AI 回复
+
+- [x] 扩展 `ChatService`，实现 `sendMessage(Long userId, SendMessageRequest request)`。
+- [x] 发送消息时校验会话归属用户。
+- [x] 保存用户消息，`role=user`。
+- [x] 生成固定 AI 回复：`你好！我是AI漫剧创作助手。关于漫剧创作的功能正在开发中，敬请期待！`。
+- [x] 保存 AI 回复，`role=ai`。
+- [x] 更新会话 `lastActive`。
+- [x] HTTP 接口返回 AI 消息 `MessageResponse`。
+- [x] 实现 `POST /api/chat/message`。
+
+验证结果：
+
+- [x] `mvn -gs ..\settings.phase1.xml test` 成功；总计 5 个测试，4 个执行通过，1 个真实 MySQL Mapper 测试默认跳过。
+- [ ] 未执行真实聊天 curl 联调，因为该验证依赖你已执行 Phase 2 的 `init.sql` 并完成 Phase 5 注册/登录获取 token。
+
+### Step 6.3 WebSocket 实时消息推送
+
+- [x] 创建 `config/WebSocketConfig.java`。
+- [x] 启用 STOMP WebSocket Message Broker。
+- [x] 配置 STOMP 端点 `/ws/chat`，支持 SockJS。
+- [x] 配置 broker 前缀 `/topic`。
+- [x] 配置应用消息前缀 `/app`。
+- [x] 创建 `controller/ChatWebSocketController.java`。
+- [x] 实现 `@MessageMapping("/chat.send")`。
+- [x] WebSocket 消息发送时从 STOMP native header 读取 `Authorization: Bearer <token>` 并解析用户身份。
+- [x] WebSocket 与 HTTP 共用 `ChatService.sendMessage`。
+- [x] AI 回复通过 `SimpMessagingTemplate` 推送到 `/topic/chat/{sessionId}`。
+
+验证结果：
+
+- [x] 短时启动烟测成功：Tomcat 启动在 `8085`，`SimpleBrokerMessageHandler` 启动并可用。
+- [x] 启动日志显示 `JwtAuthenticationFilter` 仍在 Spring Security FilterChain 中。
+- [ ] 未执行真实 WebSocket 客户端联调，因为需要先完成 SQL 初始化、用户登录并创建会话。
+
+需要你做的事：
+
+- [ ] 如果还没有执行 Phase 2 的 SQL，请先在 MySQL 中执行 `backend/src/main/resources/db/init.sql`。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 如果还没有测试 Phase 5，请先注册并登录获取 token。
+- [ ] 开始会话：
+  `curl -X POST http://localhost:8085/api/chat/start -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d "{\"title\":\"测试会话\"}"`
+- [ ] 发送消息：
+  `curl -X POST http://localhost:8085/api/chat/message -H "Authorization: Bearer <token>" -H "Content-Type: application/json" -d "{\"sessionId\":1,\"content\":\"你好\"}"`
+- [ ] 查看历史：
+  `curl http://localhost:8085/api/chat/history/1 -H "Authorization: Bearer <token>"`
+- [ ] 查看会话列表：
+  `curl http://localhost:8085/api/chat/sessions -H "Authorization: Bearer <token>"`
+- [ ] 删除会话：
+  `curl -X DELETE http://localhost:8085/api/chat/session/1 -H "Authorization: Bearer <token>"`
+- [ ] WebSocket 验证时，请连接 SockJS/STOMP 端点 `http://localhost:8085/ws/chat`，订阅 `/topic/chat/{sessionId}`，向 `/app/chat.send` 发送 JSON：`{"sessionId":1,"content":"你好"}`，并在 STOMP native header 中携带 `Authorization: Bearer <token>`。
+
+说明：
+
+- 当前聊天 AI 回复为固定模拟字符串，符合实现计划对 MVP 的限定；未接入 Python/LangChain AI 引擎。
+- WebSocket 握手路径 `/ws/**` 按 Phase 5 安全配置放行，但发送消息时仍要求 STOMP header 中携带有效 JWT。
+- 当前还没有 Phase 8 的全局异常处理，非法会话、越权访问、WebSocket token 缺失等错误会在后续统一收口为标准 JSON 错误响应。
