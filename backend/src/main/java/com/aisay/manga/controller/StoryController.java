@@ -1,6 +1,7 @@
 package com.aisay.manga.controller;
 
 import com.aisay.manga.dto.request.StoryGenerateRequest;
+import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.request.StoryUpdateRequest;
 import com.aisay.manga.dto.response.ApiResponse;
 import com.aisay.manga.dto.response.StoryDetailResponse;
@@ -32,6 +33,14 @@ public class StoryController {
     @PostMapping("/generate")
     public ApiResponse<StoryResponse> generateStory(@Valid @RequestBody StoryGenerateRequest request) {
         return ApiResponse.success("漫剧生成成功", storyService.generateStory(SecurityUtils.getCurrentUserId(), request));
+    }
+
+    @PostMapping("/{id}/outline/revise")
+    public ApiResponse<StoryDetailResponse> reviseStoryOutline(
+            @PathVariable Long id,
+            @Valid @RequestBody StoryOutlineReviseRequest request
+    ) {
+        return ApiResponse.success("大纲修改成功", storyService.reviseStoryOutline(id, SecurityUtils.getCurrentUserId(), request));
     }
 
     @GetMapping("/{id}")

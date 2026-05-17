@@ -1,7 +1,13 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import * as storyApi from '../api/storyApi';
-import type { StoryDetailResponse, StoryResponse, StoryUpdateRequest } from '../types/story';
+import type {
+  StoryDetailResponse,
+  StoryGenerateRequest,
+  StoryOutlineReviseRequest,
+  StoryResponse,
+  StoryUpdateRequest,
+} from '../types/story';
 
 const DEFAULT_PAGE_SIZE = 10;
 
@@ -46,10 +52,10 @@ export const useStoryStore = defineStore('story', () => {
     }
   }
 
-  async function generateStory(sessionId: number) {
+  async function generateStory(payload: StoryGenerateRequest) {
     isGenerating.value = true;
     try {
-      const story = await storyApi.generateStory(sessionId);
+      const story = await storyApi.generateStory(payload);
       upsertStory(story);
       return story;
     } finally {
@@ -67,6 +73,18 @@ export const useStoryStore = defineStore('story', () => {
       };
     }
     return story;
+  }
+
+  async function reviseStoryOutline(id: number, data: StoryOutlineReviseRequest) {
+    isLoading.value = true;
+    try {
+      const story = await storyApi.reviseStoryOutline(id, data);
+      currentStory.value = story;
+      upsertStory(story);
+      return story;
+    } finally {
+      isLoading.value = false;
+    }
   }
 
   async function deleteStory(id: number) {
@@ -96,6 +114,7 @@ export const useStoryStore = defineStore('story', () => {
     fetchStoryDetail,
     generateStory,
     updateStory,
+    reviseStoryOutline,
     deleteStory,
   };
 });

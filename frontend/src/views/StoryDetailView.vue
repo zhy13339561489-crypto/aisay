@@ -16,6 +16,7 @@
         <div class="hero-actions">
           <el-button @click="router.push('/stories')">返回列表</el-button>
           <el-button type="primary" @click="openEditDialog">编辑</el-button>
+          <el-button type="success" plain @click="openReviseDialog">大纲修改</el-button>
           <el-button type="warning" plain @click="ElMessage.info('封面生成将在后续 AI 图片阶段接入')">
             生成封面
           </el-button>
@@ -30,12 +31,12 @@
 
       <section class="content-grid">
         <article class="panel script-panel">
-          <h2>完整内容</h2>
-          <p class="script-text">{{ story.fullContent || '暂无完整内容。' }}</p>
+          <h2>剧情大纲</h2>
+          <p class="script-text">{{ story.fullContent || '暂无剧情大纲。' }}</p>
         </article>
 
         <article class="panel">
-          <h2>角色设定</h2>
+          <h2>主要角色设定</h2>
           <div v-if="story.characters.length > 0" class="character-grid">
             <CharacterCard
               v-for="character in story.characters"
@@ -45,28 +46,6 @@
           </div>
           <el-empty v-else description="暂无角色设定" />
         </article>
-      </section>
-
-      <section class="panel scene-panel">
-        <h2>场景列表</h2>
-        <div v-if="story.scenes.length > 0" class="scene-list">
-          <article v-for="scene in story.scenes" :key="scene.id" class="scene-card">
-            <span class="scene-number">Scene {{ scene.sceneNumber }}</span>
-            <h3>{{ scene.setting || '未命名场景' }}</h3>
-            <p>{{ scene.description || '暂无场景描述。' }}</p>
-            <div v-if="Object.keys(scene.visualElements || {}).length > 0" class="visual-tags">
-              <el-tag
-                v-for="[key, value] in Object.entries(scene.visualElements || {})"
-                :key="key"
-                size="small"
-                effect="plain"
-              >
-                {{ key }}：{{ value }}
-              </el-tag>
-            </div>
-          </article>
-        </div>
-        <el-empty v-else description="暂无场景数据" />
       </section>
     </template>
 
@@ -100,6 +79,25 @@
         <el-button type="primary" :loading="isSaving" @click="saveStory">保存</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="reviseDialogVisible" title="大纲修改意见" width="560px">
+      <el-form label-position="top">
+        <el-form-item label="请输入你希望如何修改剧情大纲">
+          <el-input
+            v-model="reviseSuggestion"
+            type="textarea"
+            :autosize="{ minRows: 5, maxRows: 10 }"
+            maxlength="5000"
+            show-word-limit
+            placeholder="例如：加强反派动机，把第二幕改得更悬疑，增加女主和主角的情感冲突。"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="reviseDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="isRevising" @click="submitOutlineRevision">提交修改</el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -117,7 +115,10 @@ const props = defineProps<{
 const router = useRouter();
 const storyStore = useStoryStore();
 const editDialogVisible = ref(false);
+const reviseDialogVisible = ref(false);
 const isSaving = ref(false);
+const isRevising = ref(false);
+const reviseSuggestion = ref('');
 const editForm = reactive({
   title: '',
   genre: '',
@@ -174,6 +175,32 @@ async function saveStory() {
     editDialogVisible.value = false;
   } finally {
     isSaving.value = false;
+  }
+}
+
+function openReviseDialog() {
+  reviseSuggestion.value = '';
+  reviseDialogVisible.value = true;
+}
+
+async function submitOutlineRevision() {
+  if (!story.value) {
+    return;
+  }
+
+  const suggestion = reviseSuggestion.value.trim();
+  if (!suggestion) {
+    ElMessage.warning('请输入大纲修改意见');
+    return;
+  }
+
+  isRevising.value = true;
+  try {
+    await storyStore.reviseStoryOutline(story.value.id, { suggestion });
+    ElMessage.success('大纲修改请求已提交');
+    reviseDialogVisible.value = false;
+  } finally {
+    isRevising.value = false;
   }
 }
 
@@ -255,8 +282,7 @@ h3 {
 }
 
 .tag-row,
-.hero-actions,
-.visual-tags {
+.hero-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
@@ -268,7 +294,6 @@ h3 {
 }
 
 .summary-card p,
-.scene-card p,
 .script-text {
   color: #475569;
   line-height: 1.8;
@@ -289,33 +314,6 @@ h3 {
   display: grid;
   gap: 14px;
   margin-top: 16px;
-}
-
-.scene-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 14px;
-  margin-top: 16px;
-}
-
-.scene-card {
-  padding: 18px;
-  border-radius: 22px;
-  background: rgba(248, 250, 252, 0.84);
-}
-
-.scene-number {
-  display: inline-block;
-  margin-bottom: 10px;
-  color: #f97316;
-  font-size: 12px;
-  font-weight: 900;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-}
-
-.scene-card h3 {
-  font-size: 20px;
 }
 
 @media (max-width: 900px) {

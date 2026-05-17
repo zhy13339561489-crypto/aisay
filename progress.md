@@ -376,7 +376,7 @@
 - [x] 生成模拟 `Story`：标题 `示例漫剧`、类型 `科幻`、风格 `日漫`、状态 `draft`，并写入示例摘要和正文。
 - [x] 自动创建 2 个默认角色：`林澈`、`星野`。
 - [x] 自动创建 2 个默认场景：`新海市废弃天文台`、`霓虹雨巷`。
-- [x] 生成接口返回 `StoryResponse`，详情接口可返回完整正文、角色列表和场景列表。
+- [x] 生成接口返回 `StoryResponse`，详情接口可返回完整正文和角色列表；场景列表字段保留兼容但前端当前不展示。
 
 需要你做的事：
 
@@ -775,7 +775,7 @@
 
 - [x] 重写 `frontend/src/views/StoryDetailView.vue`。
 - [x] 顶部展示标题、类型、风格、状态和操作按钮。
-- [x] 内容区展示故事摘要、完整内容、角色设定和场景列表。
+- [x] 内容区展示故事摘要、剧情大纲和主要角色设定。
 - [x] 新增 `frontend/src/components/story/CharacterCard.vue`，展示角色头像占位、名称、角色定位、描述、性格和外观字段。
 - [x] 详情页支持编辑基础信息：标题、类型、风格、摘要。
 - [x] 保存编辑会调用 `storyStore.updateStory`，并同步当前详情状态。
@@ -814,7 +814,7 @@
 - [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
 - [ ] 启动前端：在 `frontend` 目录运行 `npm run dev`。
 - [ ] 登录后访问 `/chat`，先创建或选择一个会话，再点击“生成漫剧”。
-- [ ] 生成成功后应自动进入 `/story/{id}`，并看到摘要、角色卡片和场景列表。
+- [ ] 生成成功后应自动进入 `/story/{id}`，并看到故事摘要、剧情大纲和主要角色卡片。
 - [ ] 访问 `/stories`，确认新生成的漫剧出现在列表中。
 - [ ] 在详情页尝试编辑标题、类型、风格、摘要，确认保存成功后页面内容更新。
 - [ ] 删除漫剧会同时删除关联角色、场景等后端级联数据；删除前请确认该测试数据不需要保留。
@@ -890,3 +890,115 @@
 - 当前统计复用已有列表接口，不新增后端统计接口。
 - 当前 `/api/files/**` 仍按后端安全配置要求 JWT，前端已通过 Axios Blob 方式处理头像预览。
 - 如果头像文件被手动删除，用户中心会自动回退到文字头像，不影响资料页其他功能。
+
+## 2026-05-17 剧情大纲生成流程调整
+
+### 变更目标
+
+- [x] 将原“生成漫剧”流程调整为“生成漫剧剧情大纲”流程。
+- [x] 点击生成时要求用户输入漫剧大纲题材，题材必填。
+- [x] 点击生成时允许用户输入大致剧情，大致剧情可选。
+- [x] 后端搭建 Java 调用 Python FastAPI 的函数边界，真实 Python 生成逻辑稍后再实现。
+
+### 后端变更
+
+- [x] 更新 `backend/src/main/java/com/aisay/manga/dto/request/StoryGenerateRequest.java`。
+- [x] `StoryGenerateRequest` 新增 `genre`，必填，最大 100 字符。
+- [x] `StoryGenerateRequest` 新增 `plot`，可选，最大 5000 字符。
+- [x] 新增 `backend/src/main/java/com/aisay/manga/dto/ai/StoryOutlineGenerateRequest.java`，作为 Java 调用 Python 的请求 DTO。
+- [x] 新增 `backend/src/main/java/com/aisay/manga/dto/ai/StoryOutlineGenerateResponse.java`，作为 Python 返回 Java 的响应 DTO。
+- [x] 新增 `backend/src/main/java/com/aisay/manga/utils/AiEngineClient.java`。
+- [x] `AiEngineClient` 默认调用 `http://localhost:5000/api/story/outline`。
+- [x] 更新 `backend/src/main/resources/application.yml`，新增 `ai.engine.base-url` 和 `ai.engine.story-outline-path`。
+- [x] 更新 `StoryServiceImpl.generateStory`：先校验会话归属，再调用 Python 剧情大纲接口，最后把返回的大纲保存到 `stories.full_content`。
+- [x] 生成结果仍保存为 `draft` 草稿，详情页可继续查看和编辑。
+
+### Python FastAPI 骨架
+
+- [x] 新增 `python-ai/requirements.txt`。
+- [x] 新增 `python-ai/main.py`。
+- [x] 新增 FastAPI 路由 `POST /api/story/outline`。
+- [x] Python 路由当前是占位实现，用输入题材和剧情拼出示例大纲。
+- [x] 后续真实生成逻辑只需要替换 `generate_story_outline` 函数内部实现。
+- [x] 更新 `generate_story_outline`，使用 LangChain `with_structured_output()` 约束模型输出。
+- [x] 更新 `NovelOutlineOutput` 结构化输出模型，固定输出 `novel_name`、`story_summary`、`outline`、`main_characters`。
+- [x] Python 内部结构化输出会映射为 Java 当前需要的 `novelName`、`storySummary`、`outline`、`mainCharacters`。
+- [x] 更新 `python-ai/requirements.txt`，补充 `langchain-core`、`langchain-community`、`dashscope`。
+- [x] 更新 `python-ai/main.py`，启动时读取 `python-ai/api.yml` 中的 `tongyi.api_key` 并写入 `DASHSCOPE_API_KEY`。
+- [x] 更新 `python-ai/requirements.txt`，补充 `PyYAML`。
+- [x] 更新 `.gitignore`，忽略 `python-ai/api.yml`，避免本地 API Key 被误提交。
+- [x] 新增 Python 路由 `POST /api/story/outline/revise`，作为后续 LangChain 大纲修改链路占位。
+- [x] 新增 `MainCharacterSetting` 结构，角色设定包含姓名、角色定位、描述、性格、外观。
+
+### 角色入库与大纲修改链路
+
+- [x] 更新 `StoryOutlineGenerateResponse`，接收 `novelName`、`storySummary`、`outline`、`mainCharacters`。
+- [x] 新增 `StoryOutlineReviseRequest` / `StoryOutlineReviseResponse` Java AI DTO。
+- [x] 新增 `dto/request/StoryOutlineReviseRequest.java`，校验修改意见必填且不超过 5000 字符。
+- [x] 更新 `AiEngineClient`，新增 `reviseStoryOutline`，默认调用 `/api/story/outline/revise`。
+- [x] 更新 `application.yml`，新增 `ai.engine.story-outline-revise-path`。
+- [x] 更新 `StoryService` 和 `StoryController`，新增 `POST /api/story/{id}/outline/revise`。
+- [x] 更新 `StoryServiceImpl.generateStory`，把 Python 返回的主要角色写入 `characters` 表。
+- [x] 更新 `StoryServiceImpl.getStoryDetail`，详情响应不再查询和返回场景列表内容。
+- [x] 更新 `StoryServiceImpl.reviseStoryOutline`，调用 Python 大纲修改接口，并把返回的大纲和角色设定同步保存到数据库。
+- [x] 更新前端 `storyApi` / `storyStore`，新增 `reviseStoryOutline`。
+- [x] 更新 `StoryDetailView.vue`，删除场景列表展示，保留剧情大纲和主要角色设定。
+- [x] 更新 `StoryDetailView.vue`，新增“大纲修改”按钮和修改意见弹窗。
+
+### 前端变更
+
+- [x] 更新 `frontend/src/types/story.ts`，新增 `StoryGenerateRequest`。
+- [x] 更新 `frontend/src/api/storyApi.ts`，`generateStory` 改为提交 `sessionId`、`genre`、`plot`。
+- [x] 更新 `frontend/src/stores/storyStore.ts`，`generateStory` 改为接收生成请求对象。
+- [x] 更新 `frontend/src/views/ChatView.vue`。
+- [x] 聊天页按钮文案从“生成漫剧”调整为“生成剧情大纲”。
+- [x] 点击按钮后弹出表单，包含题材和大致剧情。
+- [x] 题材支持选择预设题材，也支持手动输入。
+- [x] 大致剧情使用多行文本框，最多 5000 字符。
+- [x] 生成成功后追加本地 AI 提示消息，并跳转 `/story/{id}`。
+- [x] 更新 `frontend/src/views/StoryDetailView.vue`，将内容区标题改为“剧情大纲”。
+
+### 验证结果
+
+- [x] `mvn -gs ..\settings.phase1.xml compile` 成功。
+- [x] `npm run build` 成功。
+- [x] 使用 `python-ai/venv` 做 Python 语法检查成功。
+- [x] 使用 `python-ai/venv` 导入 `main.py` 成功。
+- [x] 本地确认 `ChatTongyi` 支持 `with_structured_output` 方法。
+- [x] 本地确认 `PyYAML` 可导入。
+- [ ] 未执行真实端到端调用，因为需要同时启动后端、前端和 Python FastAPI 服务。
+
+### 需要你做的事
+
+- [ ] 启动 Python FastAPI：在 `python-ai` 目录运行 `pip install -r requirements.txt`。
+- [ ] 启动 Python FastAPI：在 `python-ai` 目录运行 `uvicorn main:app --host 0.0.0.0 --port 5000 --reload`。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 启动前端：在 `frontend` 目录运行 `npm run dev`。
+- [ ] 登录后进入 `/chat`，创建或选择一个会话。
+- [ ] 点击“生成剧情大纲”，输入题材，按需填写大致剧情，然后点击“生成大纲”。
+- [ ] 如果后端返回 `Python 剧情大纲接口暂不可用`，请先确认 FastAPI 是否运行在 `http://localhost:5000`，并确认 `/api/story/outline` 路由存在。
+- [ ] 点击详情页“大纲修改”，输入修改意见后提交；当前 Python 只会返回占位修订内容，真实 LangChain 修订逻辑稍后在 `revise_story_outline` 中开发。
+- [ ] 后续实现真实 AI 逻辑时，优先修改 `python-ai/main.py` 的 `generate_story_outline` 和 `revise_story_outline` 函数，保持请求/响应字段不变即可。
+
+### 本次收口补充
+
+- [x] 清理 `StoryServiceImpl` 中旧的默认场景创建逻辑，避免生成剧情大纲时继续写入场景数据。
+- [x] 修复 `StoryServiceImpl` 中遗留乱码字符串导致的 Java 编译风险，保留生成大纲、角色入库、大纲修改同步保存的核心逻辑。
+- [x] 再次执行 `mvn -gs ..\settings.phase1.xml compile`，后端编译成功。
+- [x] 再次执行 `npm run build`，前端类型检查和生产构建成功；仍有 Sass legacy JS API、Rollup 注释和大 chunk 提示，均非阻断问题。
+- [x] 执行 `git diff --check`，仅出现 Windows LF/CRLF 换行提示，无尾随空格等阻断问题。
+
+### 2026-05-17 剧情大纲生成等待与进度输出调整
+
+- [x] 更新 `AiEngineClient`，Java 调用 Python FastAPI 时设置连接超时为 10 秒、读取超时为无限等待，避免大模型生成耗时较长时被后端提前中断。
+- [x] 更新 `python-ai/main.py`，Tongyi 模型开启 `streaming=True`。
+- [x] 新增 `ConsoleStreamingCallback`，Python 控制台会打印请求接收、模型开始、流式 token、模型完成、响应封装等进度。
+- [x] 保留 `with_structured_output(NovelOutlineOutput)`，最终返回字段仍固定为 `novelName`、`storySummary`、`outline`、`mainCharacters`。
+- [x] 执行 Python 导入检查成功：`import main`。
+- [x] 执行后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+
+需要你做的事：
+
+- [ ] 重启 Java 后端服务，让新的无限读取超时配置生效。
+- [ ] 重启 Python FastAPI 服务，让新的控制台进度日志和流式 callback 生效。
+- [ ] 如果控制台只显示阶段日志、不显示 token，说明当前 Tongyi structured output 链路没有把 token 事件透出；这不影响最终 JSON 结构化结果返回。

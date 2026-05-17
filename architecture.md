@@ -179,7 +179,7 @@ flowchart LR
 - `UserProfileResponse` 承载用户中心展示所需信息。
 - `ChatSessionResponse` 和 `MessageResponse` 承载聊天页面所需数据。
 - `StoryResponse` 承载漫剧列表卡片所需数据。
-- `StoryDetailResponse` 继承 `StoryResponse`，扩展全文、角色列表和场景列表，服务漫剧详情页。
+- `StoryDetailResponse` 继承 `StoryResponse`，扩展全文和角色列表，服务漫剧详情页；场景列表字段保留兼容，但前端当前不展示。
 
 边界约定：
 
@@ -468,7 +468,7 @@ flowchart LR
 
 - `ChatView` 已接入会话列表、消息列表、输入区、WebSocket 订阅和生成漫剧入口。
 - `StoryList` 已接入漫剧卡片网格、分页、当前页筛选和删除入口。
-- `StoryDetailView` 已接入摘要、完整内容、角色卡片、场景列表、编辑和删除入口。
+- `StoryDetailView` 已接入摘要、剧情大纲、主要角色卡片、编辑、删除和大纲修改入口。
 - `UserCenter` 已接入资料展示、资料编辑、头像上传和创作统计。
 - `LoginView` 和 `RegisterView` 已接入真实认证接口。
 
@@ -663,7 +663,7 @@ WebSocket 约定：
 
 ## 前端漫剧模块
 
-Phase 12 补齐前端漫剧模块，围绕后端 Phase 7 的 `/api/story/*` REST 接口实现漫剧列表、详情、编辑、删除，以及从聊天会话触发模拟漫剧生成。
+Phase 12 补齐前端漫剧模块，围绕后端 Phase 7 的 `/api/story/*` REST 接口实现漫剧列表、详情、编辑、删除，以及从聊天会话触发剧情大纲生成。
 
 ```mermaid
 flowchart LR
@@ -695,16 +695,16 @@ Store 职责：
 
 - `stores/storyStore.ts` 维护 `stories`、`currentStory`、`pagination`、`isLoading`、`isGenerating`。
 - `fetchStories` 同步列表和分页状态，并对异常结构兜底为空数组。
-- `fetchStoryDetail` 加载当前详情，包括 `fullContent`、角色列表和场景列表。
-- `generateStory` 调用后端模拟生成接口，并把新漫剧插入本地列表顶部。
+- `fetchStoryDetail` 加载当前详情，包括 `fullContent` 和主要角色列表。
+- `generateStory` 调用后端剧情大纲生成接口，并把新草稿插入本地列表顶部。
 - `updateStory` 更新列表和当前详情，`deleteStory` 删除列表项并清理当前详情。
 
 页面与组件职责：
 
 - `StoryList` 使用卡片网格展示漫剧，支持当前页内标题/摘要搜索、类型筛选、状态筛选、分页和删除确认。
-- `StoryDetailView` 展示标题、类型、风格、状态、摘要、完整内容、角色卡片和场景列表，并提供编辑和删除入口。
+- `StoryDetailView` 展示标题、类型、风格、状态、故事摘要、剧情大纲和主要角色卡片，并提供编辑、删除和大纲修改入口。
 - `CharacterCard` 负责角色头像占位、名称、角色定位、描述、性格和外观字段展示。
-- `ChatView` 在当前会话存在时提供“生成漫剧”按钮，生成成功后追加本地 AI 提示消息，并跳转到详情页。
+- `ChatView` 在当前会话存在时提供“生成剧情大纲”按钮，点击后要求输入题材和可选剧情，再调用后端生成接口。
 
 生成流：
 
@@ -717,12 +717,13 @@ sequenceDiagram
     participant Backend as StoryController
     participant Router as Vue Router
 
-    User->>Chat: 点击生成漫剧
-    Chat->>Store: generateStory(currentSessionId)
+    User->>Chat: 点击生成剧情大纲
+    Chat->>Chat: 输入题材和可选剧情
+    Chat->>Store: generateStory(sessionId, genre, plot)
     Store->>Api: POST /api/story/generate
-    Api->>Backend: sessionId
+    Api->>Backend: sessionId + genre + plot
     Backend-->>Store: StoryResponse
-    Store-->>Chat: 新漫剧
+    Store-->>Chat: 新剧情大纲草稿
     Chat->>Chat: 追加本地 AI 提示消息
     Chat->>Router: 跳转 /story/{id}
 ```
@@ -732,7 +733,53 @@ sequenceDiagram
 - 当前列表筛选为前端当前页筛选，因为后端 Phase 7 接口尚未提供搜索、类型、状态查询参数。
 - 当前封面生成为预留按钮，真实图片生成需要后续 AI 图片能力或文件上传流程接入。
 - 后端 `StoryResponse` 当前未返回 `updatedAt`，列表暂以 `createdAt` 展示时间；若后续需要精确更新时间，可以扩展后端 DTO。
-- 漫剧生成仍是后端模拟数据，不调用 Python/LangChain AI 引擎。
+- `/api/story/generate` 现在语义为生成剧情大纲，后端会调用 Python FastAPI 的 `/api/story/outline`。
+- Java 后端通过 `AiEngineClient` 隔离 Python 调用细节；Python 真实生成逻辑后续只需要替换 `python-ai/main.py` 中的占位实现。
+
+## Python AI 引擎调用骨架
+
+当前 Java 后端已经搭建了调用 FastAPI 的函数边界，用于后续接入 LangChain 或其他 Python 生成逻辑。
+
+```mermaid
+flowchart LR
+    ChatView["ChatView 大纲表单"]
+    StoryController["StoryController /api/story/generate"]
+    StoryService["StoryServiceImpl"]
+    AiClient["AiEngineClient"]
+    FastApi["FastAPI /api/story/outline"]
+    MySQL["MySQL stories"]
+
+    ChatView --> StoryController
+    StoryController --> StoryService
+    StoryService --> AiClient
+    AiClient --> FastApi
+    FastApi --> AiClient
+    StoryService --> MySQL
+```
+
+接口契约：
+
+- Java 对外接口仍为 `POST /api/story/generate`，请求体为 `sessionId`、`genre`、`plot`。
+- Java 到 Python 的接口为 `POST ${ai.engine.base-url}${ai.engine.story-outline-path}`，默认 `http://localhost:5000/api/story/outline`。
+- Python 请求字段为 `userId`、`sessionId`、`sessionTitle`、`genre`、`plot`。
+- Python 内部使用 `with_structured_output(NovelOutlineOutput)` 约束模型输出，固定生成 `novel_name`、`story_summary`、`outline`、`main_characters`。
+- Python 对 Java 的 HTTP 响应映射为 `novelName`、`storySummary`、`outline`、`mainCharacters`。
+- Java 保存时将 `novelName` 写入 `stories.title`，将请求题材写入 `stories.genre`，将 `storySummary` 写入 `stories.synopsis`，将 `outline` 写入 `stories.full_content`，将 `mainCharacters` 写入 `characters` 表。
+- Tongyi API Key 从 `python-ai/api.yml` 的 `tongyi.api_key` 读取，启动时写入 `DASHSCOPE_API_KEY` 环境变量。
+
+设计约束：
+
+- Java 后端负责用户鉴权、会话归属校验、保存剧情大纲草稿。
+- Python FastAPI 负责生成剧情大纲内容，当前 `python-ai/main.py` 已搭好 LangChain `ChatTongyi.with_structured_output()` 调用链。
+- 如果 FastAPI 服务未启动或接口未实现，Java 会返回清晰错误：`Python 剧情大纲接口暂不可用`。
+- `python-ai/api.yml` 是本地密钥文件，已加入 `.gitignore`，不要提交到仓库。
+
+大纲修改链路：
+
+- 前端详情页提供“大纲修改”按钮，用户输入修改意见后调用 `POST /api/story/{id}/outline/revise`。
+- Java 后端会校验 story 归属，将原始标题、摘要、大纲和修改意见转发给 Python FastAPI。
+- Python FastAPI 暂提供 `/api/story/outline/revise` 占位路由，后续在该路由中替换为真实 LangChain 修订链。
+- Java 收到修订响应后更新 `stories.synopsis`、`stories.full_content`，如返回新的主要角色，则替换 `characters` 表中的角色设定。
 
 ## 前端用户中心模块
 
@@ -788,3 +835,9 @@ flowchart LR
 - 头像只允许图片类型且前端限制 10MB，后端仍会执行扩展名、Content-Type、路径和大小校验。
 - 如果头像文件不存在或访问失败，页面回退到文字头像，不阻断用户中心渲染。
 - 文件 Blob 预览在组件卸载或头像变更时会主动 `URL.revokeObjectURL`，避免浏览器内存泄漏。
+
+## 剧情大纲生成等待与进度输出
+
+剧情大纲生成链路需要适配大模型调用耗时较长的特点，因此 Java 到 Python FastAPI 的调用只限制连接建立时间，读取响应不设置上限。这样 Python 服务已经接收请求并开始生成后，Java 后端会一直等待最终结构化 JSON 返回，不会因为生成时间长而主动超时中断。
+
+Python `generate_story_outline` 继续使用 `with_structured_output(NovelOutlineOutput)` 约束输出结构，固定返回 `novelName`、`storySummary`、`outline`、`mainCharacters`。同时 Python 控制台会通过 LangChain callback 和阶段日志打印请求接收、模型调用开始、流式 token、模型完成、响应封装等进度；如果当前 Tongyi structured output 链路没有透出 token callback，仍会保留阶段级进度日志，不影响最终结果返回。

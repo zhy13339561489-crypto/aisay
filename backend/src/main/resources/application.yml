@@ -49,3 +49,9 @@ storage:
   root-path: ./storage
   max-file-size: 10MB
   max-request-size: 50MB
+
+ai:
+  engine:
+    base-url: http://localhost:5000
+    story-outline-path: /api/story/outline
+    story-outline-revise-path: /api/story/outline/revise

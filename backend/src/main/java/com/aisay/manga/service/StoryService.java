@@ -1,6 +1,7 @@
 package com.aisay.manga.service;
 
 import com.aisay.manga.dto.request.StoryGenerateRequest;
+import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.request.StoryUpdateRequest;
 import com.aisay.manga.dto.response.StoryDetailResponse;
 import com.aisay.manga.dto.response.StoryResponse;
@@ -9,6 +10,8 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 public interface StoryService {
 
     StoryResponse generateStory(Long userId, StoryGenerateRequest request);
+
+    StoryDetailResponse reviseStoryOutline(Long storyId, Long userId, StoryOutlineReviseRequest request);
 
     StoryDetailResponse getStoryDetail(Long storyId, Long userId);
 

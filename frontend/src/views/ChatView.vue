@@ -24,7 +24,7 @@
             :disabled="!chatStore.currentSessionId"
             @click="handleGenerateStory"
           >
-            生成漫剧
+            生成剧情大纲
           </el-button>
           <el-tag :type="chatStore.isConnected ? 'success' : 'info'" effect="plain">
             {{ chatStore.isConnected ? 'WebSocket 已连接' : 'HTTP 模式' }}
@@ -69,12 +69,50 @@
         @send="handleSendMessage"
       />
     </section>
+
+    <el-dialog v-model="outlineDialogVisible" title="生成剧情大纲" width="520px">
+      <el-form ref="outlineFormRef" label-position="top" :model="outlineForm" :rules="outlineRules">
+        <el-form-item label="漫剧大纲题材" prop="genre">
+          <el-select
+            v-model="outlineForm.genre"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="请选择或输入题材"
+          >
+            <el-option label="科幻" value="科幻" />
+            <el-option label="奇幻" value="奇幻" />
+            <el-option label="悬疑" value="悬疑" />
+            <el-option label="爱情" value="爱情" />
+            <el-option label="热血" value="热血" />
+            <el-option label="都市" value="都市" />
+            <el-option label="校园" value="校园" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="大致剧情（可选）" prop="plot">
+          <el-input
+            v-model="outlineForm.plot"
+            type="textarea"
+            :autosize="{ minRows: 4, maxRows: 8 }"
+            maxlength="5000"
+            show-word-limit
+            placeholder="例如：主角在未来城市中意外获得读心能力，被卷入一场关于记忆交易的阴谋。"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="outlineDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="storyStore.isGenerating" @click="submitStoryOutline">
+          生成大纲
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 import { useRouter } from 'vue-router';
 import MessageBubble from '../components/chat/MessageBubble.vue';
 import InputArea from '../components/chat/InputArea.vue';
@@ -92,6 +130,21 @@ const storyStore = useStoryStore();
 const messageContainerRef = ref<HTMLElement>();
 const isCreating = ref(false);
 const pageError = ref('');
+const outlineDialogVisible = ref(false);
+const outlineFormRef = ref<FormInstance>();
+const outlineForm = reactive({
+  genre: '',
+  plot: '',
+});
+const outlineRules: FormRules<typeof outlineForm> = {
+  genre: [
+    { required: true, message: '请选择或输入漫剧大纲题材', trigger: 'change' },
+    { max: 100, message: '题材长度不能超过 100 个字符', trigger: 'change' },
+  ],
+  plot: [
+    { max: 5000, message: '大致剧情长度不能超过 5000 个字符', trigger: 'blur' },
+  ],
+};
 
 onMounted(initializeChatPage);
 
@@ -197,10 +250,30 @@ async function handleGenerateStory() {
     return;
   }
 
+  outlineForm.genre = '';
+  outlineForm.plot = '';
+  outlineDialogVisible.value = true;
+}
+
+async function submitStoryOutline() {
+  if (!chatStore.currentSessionId || !outlineFormRef.value) {
+    return;
+  }
+
+  const valid = await outlineFormRef.value.validate().catch(() => false);
+  if (!valid) {
+    return;
+  }
+
   await runSafely(async () => {
-    const story = await storyStore.generateStory(chatStore.currentSessionId as number);
-    chatStore.addLocalAiMessage(`漫剧《${story.title}》已生成，你可以在漫剧详情页继续查看和编辑。`, chatStore.currentSessionId);
-    ElMessage.success('漫剧生成成功');
+    const story = await storyStore.generateStory({
+      sessionId: chatStore.currentSessionId as number,
+      genre: outlineForm.genre,
+      plot: outlineForm.plot || undefined,
+    });
+    outlineDialogVisible.value = false;
+    chatStore.addLocalAiMessage(`剧情大纲《${story.title}》已生成，你可以在详情页继续查看和编辑。`, chatStore.currentSessionId);
+    ElMessage.success('剧情大纲生成成功');
     await scrollToBottom();
     router.push(`/story/${story.id}`);
   });

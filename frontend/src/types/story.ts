@@ -39,6 +39,16 @@ export interface StoryUpdateRequest {
   synopsis?: string;
 }
 
+export interface StoryGenerateRequest {
+  sessionId: number;
+  genre: string;
+  plot?: string;
+}
+
+export interface StoryOutlineReviseRequest {
+  suggestion: string;
+}
+
 export interface StoryPageResponse {
   records: StoryResponse[];
   total: number;
