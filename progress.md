@@ -825,3 +825,68 @@
 - 当前列表筛选是前端当前页内筛选，因为后端接口暂未支持搜索、类型和状态查询参数。
 - 当前后端 `StoryResponse` 未返回 `updatedAt`，列表时间暂显示 `createdAt`。
 - 封面生成入口已预留，后续需要 AI 图片生成或文件上传能力后再接真实接口。
+
+## 2026-05-17 Phase 13：前端用户中心
+
+### Step 13.1 用户中心页面
+
+- [x] 重写 `frontend/src/views/UserCenter.vue`。
+- [x] 页面顶部展示头像、用户名、邮箱、编辑资料按钮和刷新数据按钮。
+- [x] 使用 Element Plus `el-avatar` 展示头像；无头像或头像加载失败时显示用户名首字。
+- [x] 展示用户基础信息：用户 ID、用户名、邮箱、头像路径、注册时间。
+- [x] 新增统计卡片：漫剧数量、对话数量、注册日期。
+- [x] 漫剧数量通过 `storyStore.fetchStories(1, 1)` 的分页 `total` 获取。
+- [x] 对话数量通过 `chatStore.loadSessions()` 的当前用户会话数量获取。
+- [x] 提供快捷入口：继续对话、查看漫剧。
+
+### Step 13.2 编辑用户资料
+
+- [x] 编辑资料使用 `el-dialog` 弹窗。
+- [x] 表单字段包含用户名、邮箱。
+- [x] 表单校验包含用户名必填、用户名长度 3-50、邮箱必填、邮箱格式。
+- [x] 保存时调用 `userStore.updateProfile()`，对接后端 `PUT /api/user/profile`。
+- [x] 保存成功后更新 Pinia 状态和 `localStorage.userInfo`。
+
+### Step 13.3 头像上传
+
+- [x] 新增 `frontend/src/types/file.ts`，定义 `FileUploadResponse`。
+- [x] 新增 `frontend/src/api/fileApi.ts`。
+- [x] 实现 `uploadFile(file, category)`，调用 `POST /api/files/upload`。
+- [x] 实现 `loadFileBlob(filePathOrUrl)`，通过 Axios 携带 JWT 加载受保护文件 Blob。
+- [x] 用户中心使用 Element Plus `el-upload` 上传头像。
+- [x] 上传前校验文件类型必须为图片。
+- [x] 上传前校验文件大小不超过 10MB。
+- [x] 上传分类固定为 `avatars`。
+- [x] 上传成功后调用 `userStore.updateProfile({ avatarPath: result.fileUrl })` 保存头像路径。
+- [x] 头像预览通过受保护文件 Blob 转换为 `objectURL` 展示，避免 `/api/files/**` 需要 Authorization 时普通 img 无法访问。
+- [x] 组件卸载或头像变更时会释放旧的 `objectURL`。
+
+验证结果：
+
+- [x] `npm run build` 成功，`vue-tsc` 类型检查和 Vite 构建均通过。
+- [x] 未登录访问 `/user` 会被路由守卫跳转到 `/login?redirect=/user`，浏览器控制台无错误。
+- [ ] 未执行真实头像上传联调，因为需要已登录账号和本地图片文件。
+- [ ] 未执行真实编辑资料联调，因为需要已登录账号和后端运行。
+
+构建提示：
+
+- [ ] Vite 仍提示主 chunk 大于 500KB，主要来自 Element Plus 全量引入；这是性能优化提示，不影响阶段十三功能。
+- [ ] Dart Sass 仍输出 legacy JS API deprecation warning，这是依赖链提示，不影响构建结果。
+- [ ] Rollup 仍对 `@vueuse/core` 的 `#__PURE__` 注释位置给出提示，不影响构建结果。
+
+需要你做的事：
+
+- [ ] 确认已经执行 Phase 2 的 SQL，数据库中存在 `users`、`stories`、`chat_sessions` 等表。
+- [ ] 启动后端：在 `backend` 目录运行 `mvn -gs ..\settings.phase1.xml spring-boot:run`。
+- [ ] 启动前端：在 `frontend` 目录运行 `npm run dev`。
+- [ ] 登录后访问 `/user`，确认头像、用户名、邮箱、注册日期、漫剧数量和对话数量展示正常。
+- [ ] 点击“编辑资料”，修改用户名或邮箱并保存，确认页面和右上角用户名同步更新。
+- [ ] 点击“上传头像”，选择 `jpg`、`jpeg`、`png`、`gif` 或 `bmp` 图片，文件大小不超过 10MB。
+- [ ] 上传成功后确认头像即时刷新；如果没有刷新，请打开 Network 检查 `POST /api/files/upload` 和 `PUT /api/user/profile` 是否都返回 200。
+- [ ] 头像会保存到后端 `storage/avatars/{yyyy-MM-dd}/...`，如果需要清理测试头像，可后续通过文件删除接口或手动清理测试文件。
+
+说明：
+
+- 当前统计复用已有列表接口，不新增后端统计接口。
+- 当前 `/api/files/**` 仍按后端安全配置要求 JWT，前端已通过 Axios Blob 方式处理头像预览。
+- 如果头像文件被手动删除，用户中心会自动回退到文字头像，不影响资料页其他功能。

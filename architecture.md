@@ -469,7 +469,7 @@ flowchart LR
 - `ChatView` 已接入会话列表、消息列表、输入区、WebSocket 订阅和生成漫剧入口。
 - `StoryList` 已接入漫剧卡片网格、分页、当前页筛选和删除入口。
 - `StoryDetailView` 已接入摘要、完整内容、角色卡片、场景列表、编辑和删除入口。
-- `UserCenter` 当前只展示用户中心占位，真实资料编辑和统计会在 Phase 13 接入。
+- `UserCenter` 已接入资料展示、资料编辑、头像上传和创作统计。
 - `LoginView` 和 `RegisterView` 已接入真实认证接口。
 
 设计约束：
@@ -733,3 +733,58 @@ sequenceDiagram
 - 当前封面生成为预留按钮，真实图片生成需要后续 AI 图片能力或文件上传流程接入。
 - 后端 `StoryResponse` 当前未返回 `updatedAt`，列表暂以 `createdAt` 展示时间；若后续需要精确更新时间，可以扩展后端 DTO。
 - 漫剧生成仍是后端模拟数据，不调用 Python/LangChain AI 引擎。
+
+## 前端用户中心模块
+
+Phase 13 补齐用户中心页面，将用户资料、头像上传、账号编辑和创作统计统一到 `/user`。该模块复用 Phase 10 的认证 Store、Phase 11 的聊天 Store、Phase 12 的漫剧 Store，并通过文件 API 接入后端 Phase 8 的本地文件存储。
+
+```mermaid
+flowchart LR
+    UserCenter["UserCenter"]
+    UserStore["userStore"]
+    StoryStore["storyStore"]
+    ChatStore["chatStore"]
+    FileApi["fileApi"]
+    AuthApi["authApi"]
+    Axios["Axios request"]
+    BackendUser["/api/user/profile"]
+    BackendFile["/api/files"]
+    BackendStory["/api/story/list"]
+    BackendChat["/api/chat/sessions"]
+
+    UserCenter --> UserStore
+    UserCenter --> StoryStore
+    UserCenter --> ChatStore
+    UserCenter --> FileApi
+    UserStore --> AuthApi
+    AuthApi --> Axios
+    FileApi --> Axios
+    StoryStore --> Axios
+    ChatStore --> Axios
+    Axios --> BackendUser
+    Axios --> BackendFile
+    Axios --> BackendStory
+    Axios --> BackendChat
+```
+
+页面职责：
+
+- `UserCenter` 展示头像、用户名、邮箱、注册时间、用户 ID、头像路径、漫剧数量和对话数量。
+- 页面初始化会调用 `userStore.fetchProfile()` 拉取最新用户资料。
+- 漫剧统计复用 `storyStore.fetchStories(1, 1)` 的分页总数，避免为统计额外新增后端接口。
+- 对话统计复用 `chatStore.loadSessions()` 的列表长度。
+- 编辑弹窗通过 `userStore.updateProfile()` 更新用户名和邮箱，并同步 `localStorage.userInfo`。
+
+头像上传职责：
+
+- `api/fileApi.ts` 封装 `uploadFile(file, category)` 和 `loadFileBlob(filePathOrUrl)`。
+- 头像上传使用 Element Plus `el-upload`，分类固定为 `avatars`。
+- 上传成功后调用 `userStore.updateProfile({ avatarPath: fileUrl })`，把后端返回的文件 URL 写入用户资料。
+- 因 `/api/files/**` 当前仍受 JWT 保护，头像预览不会直接使用 `<img src>` 拉取，而是通过 Axios 携带 Authorization 获取 Blob，再转换为 `objectURL` 展示。
+
+设计约束：
+
+- 统计卡片以现有接口聚合为主，不新增后端统计接口；如果后续数据量增大，可以新增 `/api/user/stats` 汇总接口。
+- 头像只允许图片类型且前端限制 10MB，后端仍会执行扩展名、Content-Type、路径和大小校验。
+- 如果头像文件不存在或访问失败，页面回退到文字头像，不阻断用户中心渲染。
+- 文件 Blob 预览在组件卸载或头像变更时会主动 `URL.revokeObjectURL`，避免浏览器内存泄漏。
