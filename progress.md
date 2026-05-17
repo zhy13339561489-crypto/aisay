@@ -465,3 +465,62 @@
 - 当前 `/api/files/**` 沿用全局安全规则，上传、访问、删除都需要 JWT token；后续如果希望封面图公开访问，可以在安全配置中单独放行 GET 文件接口。
 - 文件默认保存在后端工作目录下的 `storage` 目录中，应用启动时会自动创建 `storage`、`avatars`、`resources`、`covers` 基础目录。
 - 当前文件记录未写入数据库，只返回路径给前端或业务模块保存；后续头像、封面图等字段可以直接保存 `filePath` 或 `fileUrl`。
+
+## 2026-05-17 Phase 9：前端路由与布局
+
+### Step 9.1 Vue Router 路由配置
+
+- [x] 更新 `frontend/src/router/index.ts`，补齐阶段九要求的前端路由表。
+- [x] `/` 重定向到 `/chat`。
+- [x] `/chat` 懒加载 `ChatView.vue`。
+- [x] `/chat/:sessionId` 懒加载 `ChatView.vue`，并通过 props 接收 `sessionId`。
+- [x] `/stories` 懒加载 `StoryList.vue`。
+- [x] `/story/:id` 懒加载 `StoryDetailView.vue`，并通过 props 接收 `id`。
+- [x] `/user` 懒加载 `UserCenter.vue`。
+- [x] `/login` 懒加载 `LoginView.vue`。
+- [x] `/register` 懒加载 `RegisterView.vue`。
+- [x] 新增路由守卫：除 `/login`、`/register` 外，未登录用户会跳转 `/login?redirect=<原路径>`。
+- [x] 新增访客页保护：已登录用户访问 `/login` 或 `/register` 时会跳转 `/chat`。
+- [x] 新增兜底路由，将未知前端路径重定向到 `/chat`。
+
+验证结果：
+
+- [x] `npm run build` 成功，`vue-tsc` 类型检查和 Vite 生产构建均通过。
+- [x] 构建产物按懒加载拆出了 `ChatView`、`StoryList`、`StoryDetailView`、`UserCenter`、`LoginView`、`RegisterView`、`AppLayout` 等独立 chunk。
+- [x] `npm run dev -- --host 127.0.0.1` 短启动烟测成功，Vite 在 `http://127.0.0.1:8080/` 返回 HTTP 200。
+- [ ] 未打开浏览器手动点选路由；阶段九已通过构建和 dev server 验证，后续你可启动前端后手动访问各路径确认跳转体验。
+
+构建提示：
+
+- [ ] Vite 提示主 chunk 大于 500KB，主要来自当前阶段全量引入 Element Plus；后续可以通过按需引入或手动分包优化。
+- [ ] Dart Sass 输出 legacy JS API deprecation warning，这是依赖链提示，不影响构建结果。
+- [ ] Rollup 对 `@vueuse/core` 的 `#__PURE__` 注释位置给出提示，不影响构建结果。
+- [ ] 沙箱内短启动 Vite 时曾遇到 `spawn EPERM`，授权外运行后成功，说明是本地子进程启动权限限制，不是代码问题。
+
+### Step 9.2 基础布局组件
+
+- [x] 新增 `frontend/src/components/common/AppLayout.vue`。
+- [x] 顶部导航包含 Logo、`对话`、`漫剧列表` 两个主导航入口。
+- [x] 用户菜单包含 `个人中心` 与 `退出登录`。
+- [x] 退出登录会移除 `localStorage.token` 和 `localStorage.userInfo`，并跳转 `/login`。
+- [x] 布局使用 `<RouterView />` 承载受保护页面内容。
+- [x] 布局已做移动端适配，窄屏下导航会换行。
+- [x] 新增阶段九占位页面：`ChatView.vue`、`StoryList.vue`、`StoryDetailView.vue`、`UserCenter.vue`、`LoginView.vue`、`RegisterView.vue`。
+- [x] `LoginView.vue` 提供临时本地登录按钮，写入 `phase-9-local-token`，用于在 Phase 10 真实认证接入前验证路由守卫和布局。
+
+需要你做的事：
+
+- [ ] 启动前端：在 `frontend` 目录运行 `npm run dev`，访问 `http://localhost:8080`。
+- [ ] 未登录状态访问 `http://localhost:8080/chat`，应跳转到 `/login?redirect=/chat`。
+- [ ] 在登录页点击 `进入系统`，会写入临时 token 并跳回目标页面。
+- [ ] 登录后访问 `http://localhost:8080/chat`、`/chat/1`、`/stories`、`/story/1`、`/user`，确认页面都能展示。
+- [ ] 点击顶部导航的 `对话`、`漫剧列表`，确认路由切换正常。
+- [ ] 点击右上角用户菜单的 `个人中心`，确认跳转 `/user`。
+- [ ] 点击右上角用户菜单的 `退出登录`，确认清理 token 并回到 `/login`。
+- [ ] Phase 10 开始接入真实登录后，请把 `LoginView.vue` 中的临时本地登录逻辑替换为真实 `userStore.login()`。
+
+说明：
+
+- 阶段九只实现路由与基础布局，不调用后端接口；MySQL、Redis、RabbitMQ 在线状态不会影响本阶段构建。
+- 当前登录判断使用 `localStorage.getItem("token")`，这是为了和后续 Phase 10 的用户 Store 持久化策略保持一致。
+- 当前页面是可编译占位页，真实聊天、漫剧列表、漫剧详情、用户中心内容会在 Phase 10 到 Phase 13 继续填充。

@@ -412,3 +412,68 @@ flowchart LR
 - 当前所有 `/api/files/**` 接口都沿用 JWT 认证规则；如果后续封面图需要公开展示，可以仅放行 `GET /api/files/**`，上传和删除继续要求认证。
 - 当前文件元数据不单独入库，由业务字段保存返回的 `filePath` 或 `fileUrl`；例如用户头像可写入 `users.avatar_path`，漫剧封面可写入 `stories.cover_image_path`。
 - 本地文件存储适合 MVP 和单机开发，后续如迁移到 MinIO/对象存储，可以保留 Controller 响应契约，只替换 `LocalFileStorageUtil` 的实现。
+
+## 前端路由与基础布局模块
+
+Phase 9 在前端补齐 Vue Router 路由表、登录守卫和应用主布局。当前阶段的页面以可编译占位内容为主，目的是先稳定页面骨架，让 Phase 10 到 Phase 13 可以在既有路由和布局中继续接入认证、聊天、漫剧和用户中心业务。
+
+```mermaid
+flowchart LR
+    Browser["浏览器"]
+    Router["Vue Router"]
+    Guard["路由守卫"]
+    Login["LoginView / RegisterView"]
+    Layout["AppLayout"]
+    Chat["ChatView"]
+    Stories["StoryList"]
+    Detail["StoryDetailView"]
+    User["UserCenter"]
+    Storage["localStorage.token"]
+
+    Browser --> Router
+    Router --> Guard
+    Guard --> Storage
+    Guard -->|未登录| Login
+    Guard -->|已登录| Layout
+    Layout --> Chat
+    Layout --> Stories
+    Layout --> Detail
+    Layout --> User
+```
+
+路由结构：
+
+- `/` 重定向到 `/chat`。
+- `/login` 和 `/register` 是访客页面，不套用主布局。
+- `/chat`、`/chat/:sessionId`、`/stories`、`/story/:id`、`/user` 是受保护页面，统一挂在 `AppLayout` 下。
+- 未知前端路径兜底重定向到 `/chat`，再由守卫决定是否需要登录。
+- 所有页面组件均使用懒加载，减少首屏路由表对后续模块的耦合。
+
+守卫规则：
+
+- 受保护路由依赖 `localStorage.token` 判断登录态。
+- 未登录访问受保护路由时跳转 `/login?redirect=<原路径>`。
+- 已登录访问 `/login` 或 `/register` 时跳转 `/chat`。
+- Phase 10 接入 Pinia 用户 Store 后，可以保留当前路由结构，只把登录态读取从 `localStorage` 升级为 Store + 持久化同步。
+
+布局职责：
+
+- `AppLayout` 提供顶部导航、品牌入口、用户菜单和内容承载区。
+- 顶部导航当前包含 `对话` 与 `漫剧列表`，对应 `/chat` 和 `/stories`。
+- 用户菜单当前包含 `个人中心` 和 `退出登录`。
+- 退出登录负责清理 `localStorage.token` 与 `localStorage.userInfo`，并跳转 `/login`。
+- 布局通过 `<RouterView />` 渲染子页面，保证后续业务页面只关注自身内容。
+
+页面边界：
+
+- `ChatView` 当前只展示会话路由占位和可选 `sessionId`，真实聊天组件会在 Phase 11 接入。
+- `StoryList` 当前只展示列表占位，真实列表、分页、筛选会在 Phase 12 接入。
+- `StoryDetailView` 当前只展示路由作品 ID，真实详情、角色卡片、场景列表会在 Phase 12 接入。
+- `UserCenter` 当前只展示用户中心占位，真实资料编辑和统计会在 Phase 13 接入。
+- `LoginView` 和 `RegisterView` 当前为 Phase 10 预留，`LoginView` 只提供临时本地 token 写入来验证阶段九守卫。
+
+设计约束：
+
+- 阶段九不直接调用后端 API，避免把路由布局工作和认证业务耦合在一起。
+- 当前临时 token 仅用于本地路由验证，不代表真实认证；Phase 10 必须替换为 `POST /api/auth/login` 返回的 JWT。
+- 视觉层保留明确的品牌感和响应式布局，但不抢占后续聊天、漫剧列表、用户中心的业务组件设计空间。
