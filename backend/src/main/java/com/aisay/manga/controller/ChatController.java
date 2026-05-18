@@ -29,7 +29,7 @@ public class ChatController {
     }
 
     @PostMapping("/start")
-    public ApiResponse<ChatSessionResponse> startSession(@Valid @RequestBody(required = false) ChatStartRequest request) {
+    public ApiResponse<ChatSessionResponse> startSession(@Valid @RequestBody ChatStartRequest request) {
         return ApiResponse.success("会话创建成功", chatService.startSession(SecurityUtils.getCurrentUserId(), request));
     }
 

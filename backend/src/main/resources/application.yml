@@ -56,3 +56,4 @@ ai:
     story-outline-path: /api/story/outline
     story-outline-revise-path: /api/story/outline/revise
     story-volume-outline-path: /api/story/volume-outline
+    chat-agent-path: /api/chat/agent

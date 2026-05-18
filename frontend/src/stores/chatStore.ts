@@ -3,7 +3,7 @@ import { defineStore } from 'pinia';
 import { Client, type IMessage, type StompSubscription } from '@stomp/stompjs';
 import * as chatApi from '../api/chatApi';
 import type { ApiResponse } from '../types/auth';
-import type { ChatSessionResponse, MessageResponse } from '../types/chat';
+import type { ChatSessionResponse, ChatStartRequest, MessageResponse } from '../types/chat';
 
 export const useChatStore = defineStore('chat', () => {
   const currentSessionId = ref<number | null>(null);
@@ -26,8 +26,8 @@ export const useChatStore = defineStore('chat', () => {
     return sessions.value;
   }
 
-  async function startNewSession(title?: string) {
-    const session = await chatApi.startSession(title || '新对话');
+  async function startNewSession(payload: ChatStartRequest) {
+    const session = await chatApi.startSession(payload);
     upsertSession(session);
     currentSessionId.value = session.id;
     messages.value = [];
@@ -59,10 +59,9 @@ export const useChatStore = defineStore('chat', () => {
       return null;
     }
 
-    let sessionId = currentSessionId.value;
+    const sessionId = currentSessionId.value;
     if (!sessionId) {
-      const session = await startNewSession();
-      sessionId = session.id;
+      throw new Error('请先新建对话并选择绑定的漫剧');
     }
 
     const userMessage = createOptimisticUserMessage(sessionId, trimmedContent);

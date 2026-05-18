@@ -34,6 +34,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS chat_sessions (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     user_id BIGINT NOT NULL,
+    story_id BIGINT,
     session_key VARCHAR(100) NOT NULL,
     title VARCHAR(200),
     context_data JSON,
@@ -44,6 +45,7 @@ CREATE TABLE IF NOT EXISTS chat_sessions (
     last_active TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_chat_sessions_session_key (session_key),
     KEY idx_chat_sessions_user_id (user_id),
+    KEY idx_chat_sessions_story_id (story_id),
     KEY idx_chat_sessions_status (status),
     KEY idx_chat_sessions_last_active (last_active),
     CONSTRAINT fk_chat_sessions_user
@@ -86,6 +88,11 @@ CREATE TABLE IF NOT EXISTS stories (
         FOREIGN KEY (user_id) REFERENCES users(id)
         ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+ALTER TABLE chat_sessions
+    ADD CONSTRAINT fk_chat_sessions_story
+        FOREIGN KEY (story_id) REFERENCES stories(id)
+        ON DELETE SET NULL;
 
 CREATE TABLE IF NOT EXISTS characters (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,

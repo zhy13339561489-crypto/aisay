@@ -13,6 +13,8 @@ public class ChatSessionResponse {
 
     private Long id;
 
+    private Long storyId;
+
     private String sessionKey;
 
     private String title;

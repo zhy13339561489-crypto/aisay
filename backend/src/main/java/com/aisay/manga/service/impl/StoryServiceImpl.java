@@ -76,19 +76,16 @@ public class StoryServiceImpl implements StoryService {
         ));
         LocalDateTime now = LocalDateTime.now();
 
-        Story story = new Story();
-        story.setUserId(userId);
+        Story story = resolveBoundStory(session, userId, request.getGenre(), now);
         story.setTitle(resolveText(outline.getNovelName(), request.getGenre() + " story outline"));
         story.setGenre(request.getGenre());
         story.setStyle(OUTLINE_STYLE);
         story.setSynopsis(resolveText(outline.getStorySummary(), request.getPlot()));
         story.setFullContent(resolveText(outline.getOutline(), "Python AI engine did not return an outline."));
         story.setStatus(STORY_STATUS_DRAFT);
-        story.setViewCount(0);
-        story.setLikeCount(0);
-        story.setCreatedAt(now);
         story.setUpdatedAt(now);
-        storyMapper.insert(story);
+        storyMapper.updateById(story);
+        characterMapper.delete(new LambdaQueryWrapper<Character>().eq(Character::getStoryId, story.getId()));
         saveMainCharacters(story.getId(), outline.getMainCharacters());
 
         return toStoryResponse(story);
@@ -235,6 +232,16 @@ public class StoryServiceImpl implements StoryService {
             character.setAppearance(setting.getAppearance());
             characterMapper.insert(character);
         });
+    }
+
+    private Story resolveBoundStory(ChatSession session, Long userId, String genre, LocalDateTime now) {
+        if (session.getStoryId() != null) {
+            Story story = storyMapper.selectById(session.getStoryId());
+            if (story != null && story.getUserId().equals(userId)) {
+                return story;
+            }
+        }
+        throw new IllegalStateException("This session is not bound to a valid story. Please create a new session and select a story.");
     }
 
     private void saveManualCharacters(Long storyId, List<StoryDetailUpdateRequest.CharacterUpdateItem> characters) {

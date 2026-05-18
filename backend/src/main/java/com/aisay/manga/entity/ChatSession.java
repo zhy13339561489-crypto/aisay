@@ -23,6 +23,8 @@ public class ChatSession {
 
     private Long userId;
 
+    private Long storyId;
+
     private String sessionKey;
 
     private String title;

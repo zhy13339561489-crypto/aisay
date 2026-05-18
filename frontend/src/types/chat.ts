@@ -1,5 +1,6 @@
 export interface ChatSessionResponse {
   id: number;
+  storyId?: number;
   sessionKey: string;
   title: string;
   status: string;
@@ -16,6 +17,7 @@ export interface MessageResponse {
 }
 
 export interface ChatStartRequest {
+  storyId: number;
   title?: string;
 }
 

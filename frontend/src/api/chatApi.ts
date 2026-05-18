@@ -1,13 +1,13 @@
 import request from './index';
 import type { ApiResponse } from '../types/auth';
-import type { ChatSessionResponse, MessageResponse } from '../types/chat';
+import type { ChatSessionResponse, ChatStartRequest, MessageResponse } from '../types/chat';
 
 function unwrap<T>(response: ApiResponse<T>): T {
   return response.data;
 }
 
-export async function startSession(title?: string) {
-  const response = await request.post<ApiResponse<ChatSessionResponse>>('/api/chat/start', title ? { title } : {});
+export async function startSession(data: ChatStartRequest) {
+  const response = await request.post<ApiResponse<ChatSessionResponse>>('/api/chat/start', data);
   return unwrap(response.data);
 }
 

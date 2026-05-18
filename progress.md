@@ -1064,3 +1064,75 @@
 - [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
 - [x] 前端构建成功：`npm run build`。
 - [x] Python 模块导入检查成功。
+
+## 2026-05-18 对话绑定漫剧与对话内修改
+
+### 数据库
+
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260518_add_chat_session_story_id.sql`，用于给 `chat_sessions` 表增加 `story_id`。
+- [x] 更新 `backend/src/main/resources/db/init.sql`，新环境 `chat_sessions` 会包含 `story_id` 字段。
+
+### 后端
+
+- [x] 更新 `ChatSession` 实体和 `ChatSessionResponse`，会话响应会返回绑定的 `storyId`。
+- [x] 根据最新要求调整：新建对话不再自动创建 story，而是必须选择一个已有漫剧进行绑定。
+- [x] 后端 `POST /api/chat/start` 要求传入 `storyId`，并校验该 story 是否属于当前用户。
+- [x] `POST /api/story/generate` 不再每次创建新 story，而是更新当前会话绑定的 story；因此同一对话中可以随时重新生成剧情大纲。
+- [x] 对话发送消息时，如果绑定 story 已有剧情大纲，会把用户消息当作修改意见调用 Python 大纲修改接口，并更新绑定 story。
+- [x] 如果绑定 story 还没有剧情大纲，对话会提示先点击“生成剧情大纲”。
+
+### 前端
+
+- [x] `ChatSessionResponse` 类型新增 `storyId`。
+- [x] 聊天页新建对话会弹出漫剧选择列表，必须选择绑定漫剧后才能创建。
+- [x] 聊天页“生成剧情大纲”按钮不再要求先选择会话；没有绑定会话时会先弹出漫剧选择列表，创建绑定对话后继续生成。
+- [x] 生成剧情大纲完成后停留在聊天页，不再强制跳转详情页，方便继续对绑定漫剧提出修改意见。
+- [x] 聊天页显示当前绑定漫剧，并提供“查看绑定漫剧”按钮。
+
+### 验证结果
+
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] 前端构建成功：`npm run build`。
+
+### 需要你做的事
+
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260518_add_chat_session_story_id.sql`。
+- [ ] 重启 Java 后端。
+- [ ] 重新打开前端聊天页，点击“新建对话”或“生成剧情大纲”，确认会先列出漫剧并要求选择绑定对象。
+- [ ] 生成大纲后，在同一个对话里输入修改意见，确认绑定漫剧详情页中的剧情大纲被更新。
+- [ ] 如果 `/api/chat/sessions` 或 `/api/chat/start` 仍然返回 500，请优先确认 `chat_sessions` 表已经存在 `story_id` 字段。
+
+## 2026-05-18 对话 Agent 调度链
+
+### 目标
+
+- [x] 对话消息先进入 Java 后端，由 Java 完成登录用户、会话和绑定漫剧校验。
+- [x] Java 通过 HTTP 调用 Python 统一 Agent 方法。
+- [x] Python 方法负责问题重写、路由分发、大模型结构化返回。
+- [x] Python 返回 JSON，包含要调用的 Java 方法名和 Java 方法参数。
+- [x] Java 使用白名单分发执行，避免 Python 返回任意方法名造成安全风险。
+
+### 后端
+
+- [x] 新增 `ChatAgentRequest` / `ChatAgentResponse` Java DTO。
+- [x] `AiEngineClient` 新增 `runChatAgent`，默认调用 Python `/api/chat/agent`。
+- [x] `application.yml` 新增 `ai.engine.chat-agent-path`。
+- [x] `ChatServiceImpl.sendMessage` 调整为：保存用户消息 -> 调用 Python Agent -> 根据 `javaMethod` 分发 -> 保存 AI 回复。
+- [x] 当前 Java 白名单支持 `story.updateOutline` 和 `story.none`。
+- [x] `story.updateOutline` 会根据 Python 返回的 `storySummary`、`outline`、`mainCharacters` 更新绑定漫剧。
+
+### Python
+
+- [x] 新增 `POST /api/chat/agent`。
+- [x] 新增 `ChatAgentRequest` / `ChatAgentOutput` / `ChatAgentResponse` Pydantic 模型。
+- [x] 新增 Agent 提示词，要求输出 `rewrittenQuestion`、`route`、`javaMethod`、`javaMethodArgs`、`assistantMessage`。
+- [x] Python 侧也会校验 `javaMethod` 是否属于允许集合，不支持时回退为 `story.none`。
+
+### 验证结果
+
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] Python 模块导入检查成功。
+
+### 后续扩展建议
+
+- [ ] 如需分卷大纲、章节生成、角色增删、世界观设定等更多能力，只需在 Java 白名单中新增方法，并在 Python Agent 提示词中加入对应 `javaMethod` 和参数结构。

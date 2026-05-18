@@ -847,3 +847,19 @@ Python `generate_story_outline` 继续使用 `with_structured_output(NovelOutlin
 剧情大纲详情现在拆为三个主要内容区：`stories.full_content` 保存剧情大纲，`characters` 表保存主要角色设定，`story_volume_outlines` 表保存分卷大纲。`stories` 与 `story_volume_outlines` 是一对多关系，一个故事可以拥有多个分卷大纲记录。前端详情页提供“手动修改大纲/角色”弹窗，用户可以基于现有文本直接修改故事摘要、剧情大纲和角色设定；保存时调用 `PUT /api/story/{id}/detail`，Java 后端校验 story 归属后更新 `stories.synopsis`、`stories.full_content`，并用提交的角色列表整体替换当前 story 的 `characters` 数据。
 
 分卷大纲生成由前端详情页“分卷大纲生成”按钮触发，调用 `POST /api/story/{id}/volume-outline/generate`。Java 后端读取当前 story 的标题、摘要、剧情大纲和角色设定，转发给 Python FastAPI `/api/story/volume-outline`。Python 侧通过 LangChain `with_structured_output(VolumeOutlineOutput)` 固定返回 `volumes` 数组，提示词要求每卷尽可能提供更多剧情细节、冲突、反转、角色选择、情绪钩子和卷末悬念。Java 收到结果后会替换当前 story 的旧分卷，并逐条写入 `story_volume_outlines` 表，再返回最新详情给前端展示。
+
+## 对话绑定漫剧
+
+每个新建对话都必须绑定一个 story。前端在新建对话时会先读取漫剧列表，用户选择一个已有漫剧后再调用 `POST /api/chat/start`，请求体包含 `storyId` 和可选 `title`。后端在 `ChatService.startSession` 中校验 story 归属后，把 `stories.id` 写入 `chat_sessions.story_id`，前端 `ChatSessionResponse` 会拿到 `storyId` 并在聊天页显示“查看绑定漫剧”入口。这样聊天不再只是孤立消息流，而是围绕一部固定漫剧持续迭代。
+
+剧情大纲生成现在以“会话绑定 story”为写入目标。`POST /api/story/generate` 会先校验会话归属，然后读取 `chat_sessions.story_id` 对应的 story，并把 Python 返回的小说名、故事摘要、剧情大纲和主要角色设定写回这个绑定 story。用户可以在同一个对话里随时重新生成剧情大纲，结果会覆盖并更新绑定 story，而不是创建新的 story。
+
+对话内修改也作用于绑定 story。`POST /api/chat/message` 保存用户消息后，会调用 Python `/api/chat/agent` 做问题重写、路由分发和方法参数生成；Java 再按白名单执行对应方法，将结果同步保存到绑定 story。
+
+## 对话 Agent 调度链
+
+对话消息采用 Java 接入、Python 决策、Java 执行的工具调用模式。前端发送 `POST /api/chat/message` 后，Java 后端先校验当前用户、会话归属和绑定 story，再保存用户消息。随后 Java 通过 `AiEngineClient.runChatAgent` 调用 Python FastAPI `/api/chat/agent`。
+
+Python Agent 会完成问题重写、路由分发和大模型结构化输出，固定返回 `rewrittenQuestion`、`route`、`javaMethod`、`javaMethodArgs`、`assistantMessage`。其中 `javaMethod` 表示希望 Java 执行的方法，`javaMethodArgs` 是对应参数。当前白名单支持 `story.updateOutline` 和 `story.none`：前者更新绑定漫剧的摘要、剧情大纲和主要角色设定，后者只返回回复不改数据库。
+
+Java 不会执行 Python 返回的任意方法名，而是通过白名单分发。这样 Python 负责理解用户意图和组织参数，Java 负责权限校验、数据库写入和业务一致性。后续如果要加入分卷大纲生成、章节生成、角色增删等能力，只需要同时扩展 Python Agent 提示词和 Java 白名单方法。

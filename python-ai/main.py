@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 from pathlib import Path
+from typing import Any
 
 import uvicorn
 import yaml
@@ -57,6 +58,41 @@ Main characters:
 {Characters}
 """
 promptTemplate_VolumeOutline = PromptTemplate.from_template(prompt_VolumeOutline)
+prompt_ChatAgent = """
+You are the routing and tool-calling agent for an AI comic/story creation system.
+The user is chatting inside a Java-managed conversation that is bound to one story.
+
+You must do three things:
+1. Rewrite the user question into a clear, standalone instruction.
+2. Decide the route.
+3. Return the exact Java method name and arguments that Java should execute.
+
+Supported Java methods:
+- story.updateOutline
+  Use this when the user wants to modify, polish, expand, shorten, restructure, or continue the bound story outline.
+  javaMethodArgs must include:
+  - storySummary: updated story summary in Chinese
+  - outline: updated complete outline in Chinese
+  - mainCharacters: updated main character settings array
+- story.none
+  Use this when no database mutation should happen, for example greeting, explanation, or when the story has no outline yet.
+  javaMethodArgs should be an empty object.
+
+Important rules:
+- Only return one of the supported Java methods.
+- If the current outline is empty, do not invent a full story update inside chat. Return story.none and tell the user to generate the story outline first.
+- If updating the outline, preserve useful existing content and apply the user's requested change.
+- The assistantMessage should be a short Chinese response explaining what was done.
+
+Bound story:
+Title: {Title}
+Summary: {StorySummary}
+Outline: {Outline}
+
+User message:
+{UserMessage}
+"""
+promptTemplate_ChatAgent = PromptTemplate.from_template(prompt_ChatAgent)
 
 llm = ChatTongyi(
     model="qwen-max",
@@ -170,6 +206,28 @@ class StoryVolumeOutlineGenerateResponse(BaseModel):
     volumes: list[VolumeOutlineItem]
 
 
+class ChatAgentRequest(BaseModel):
+    user_id: int = Field(alias="userId")
+    session_id: int = Field(alias="sessionId")
+    story_id: int = Field(alias="storyId")
+    title: str
+    synopsis: str | None = None
+    outline: str | None = None
+    user_message: str = Field(alias="userMessage")
+
+
+class ChatAgentOutput(BaseModel):
+    rewritten_question: str = Field(alias="rewrittenQuestion", description="Standalone rewritten user question")
+    route: str = Field(description="Routing label, such as update_outline or no_action")
+    java_method: str = Field(alias="javaMethod", description="One supported Java method name")
+    java_method_args: dict[str, Any] = Field(default_factory=dict, alias="javaMethodArgs")
+    assistant_message: str = Field(alias="assistantMessage", description="Short Chinese response to the user")
+
+
+class ChatAgentResponse(ChatAgentOutput):
+    pass
+
+
 class NovelOutlineOutput(BaseModel):
     novel_name: str = Field(description="Novel title, concise and recognizable")
     story_summary: str = Field(description="Story summary, 200-300 Chinese characters")
@@ -277,6 +335,47 @@ def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> Story
     response = StoryVolumeOutlineGenerateResponse(volumes=result.volumes)
     log_progress(trace_id, "response ready", started_at, scope)
     return response
+
+
+@app.post("/api/chat/agent", response_model=ChatAgentResponse)
+def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
+    trace_id = uuid.uuid4().hex[:8]
+    started_at = time.perf_counter()
+    scope = "chat-agent"
+    log_progress(
+        trace_id,
+        f"request accepted, user_id={request.user_id}, session_id={request.session_id}, story_id={request.story_id}",
+        started_at,
+        scope,
+    )
+
+    structured_llm = llm.with_structured_output(ChatAgentOutput)
+    chain = promptTemplate_ChatAgent | structured_llm
+    log_progress(trace_id, "rewriting question and routing to Java method", started_at, scope)
+    result = chain.invoke(
+        {
+            "Title": request.title,
+            "StorySummary": request.synopsis or "",
+            "Outline": request.outline or "",
+            "UserMessage": request.user_message,
+        },
+        config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+    )
+    log_progress(trace_id, f"agent selected method={result.java_method}, route={result.route}", started_at, scope)
+
+    allowed_methods = {"story.updateOutline", "story.none"}
+    if result.java_method not in allowed_methods:
+        result.java_method = "story.none"
+        result.java_method_args = {}
+        result.assistant_message = "我理解了你的请求，但当前工具白名单还不支持这个操作。"
+
+    return ChatAgentResponse(
+        rewrittenQuestion=result.rewritten_question,
+        route=result.route,
+        javaMethod=result.java_method,
+        javaMethodArgs=result.java_method_args,
+        assistantMessage=result.assistant_message,
+    )
 
 
 if __name__ == "__main__":

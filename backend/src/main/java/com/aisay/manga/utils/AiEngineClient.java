@@ -1,5 +1,7 @@
 package com.aisay.manga.utils;
 
+import com.aisay.manga.dto.ai.ChatAgentRequest;
+import com.aisay.manga.dto.ai.ChatAgentResponse;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateRequest;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
 import com.aisay.manga.dto.ai.StoryOutlineReviseRequest;
@@ -25,12 +27,15 @@ public class AiEngineClient {
 
     private final String storyVolumeOutlinePath;
 
+    private final String chatAgentPath;
+
     public AiEngineClient(
             RestClient.Builder restClientBuilder,
             @Value("${ai.engine.base-url:http://localhost:5000}") String baseUrl,
             @Value("${ai.engine.story-outline-path:/api/story/outline}") String storyOutlinePath,
             @Value("${ai.engine.story-outline-revise-path:/api/story/outline/revise}") String storyOutlineRevisePath,
-            @Value("${ai.engine.story-volume-outline-path:/api/story/volume-outline}") String storyVolumeOutlinePath
+            @Value("${ai.engine.story-volume-outline-path:/api/story/volume-outline}") String storyVolumeOutlinePath,
+            @Value("${ai.engine.chat-agent-path:/api/chat/agent}") String chatAgentPath
     ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(10));
@@ -43,6 +48,7 @@ public class AiEngineClient {
         this.storyOutlinePath = storyOutlinePath;
         this.storyOutlineRevisePath = storyOutlineRevisePath;
         this.storyVolumeOutlinePath = storyVolumeOutlinePath;
+        this.chatAgentPath = chatAgentPath;
     }
 
     public StoryOutlineGenerateResponse generateStoryOutline(StoryOutlineGenerateRequest request) {
@@ -93,6 +99,23 @@ public class AiEngineClient {
             return response;
         } catch (RestClientException ex) {
             throw new IllegalStateException("Python volume outline API is unavailable: " + storyVolumeOutlinePath, ex);
+        }
+    }
+
+    public ChatAgentResponse runChatAgent(ChatAgentRequest request) {
+        try {
+            ChatAgentResponse response = restClient.post()
+                    .uri(chatAgentPath)
+                    .body(request)
+                    .retrieve()
+                    .body(ChatAgentResponse.class);
+
+            if (response == null) {
+                throw new IllegalStateException("Python chat agent returned empty response");
+            }
+            return response;
+        } catch (RestClientException ex) {
+            throw new IllegalStateException("Python chat agent API is unavailable: " + chatAgentPath, ex);
         }
     }
 }
