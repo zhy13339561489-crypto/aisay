@@ -1002,3 +1002,65 @@
 - [ ] 重启 Java 后端服务，让新的无限读取超时配置生效。
 - [ ] 重启 Python FastAPI 服务，让新的控制台进度日志和流式 callback 生效。
 - [ ] 如果控制台只显示阶段日志、不显示 token，说明当前 Tongyi structured output 链路没有把 token 事件透出；这不影响最终 JSON 结构化结果返回。
+
+## 2026-05-17 剧情大纲手动编辑与分卷大纲生成
+
+### 数据库
+
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260518_create_story_volume_outlines.sql`，用于创建 `story_volume_outlines` 分卷大纲表。
+- [x] 同步更新 `backend/src/main/resources/db/init.sql`，新环境初始化时会包含 `story_volume_outlines` 表。
+- [x] 移除 `Story` 实体中的 `volumeOutline` 字段，避免 `stories` 表缺少 `volume_outline` 时 `selectById` 报错。
+- [x] 新增 `StoryVolumeOutline` 实体和 `StoryVolumeOutlineMapper`，故事与分卷大纲为一对多关系。
+- [x] 更新 `StoryDetailResponse`，详情接口返回 `volumeOutlines` 列表。
+
+### Java 后端
+
+- [x] 新增 `PUT /api/story/{id}/detail`，用于手动保存故事摘要、剧情大纲和角色设定。
+- [x] 手动保存角色设定时，会以页面提交的角色列表整体替换当前 story 的 `characters` 数据。
+- [x] 新增 `POST /api/story/{id}/volume-outline/generate`，用于根据当前剧情大纲调用 Python 生成分卷大纲。
+- [x] 新增 Java AI DTO `StoryVolumeOutlineGenerateRequest` / `StoryVolumeOutlineGenerateResponse`。
+- [x] 更新 `AiEngineClient`，新增 `/api/story/volume-outline` 调用。
+- [x] 分卷大纲生成成功后会先清理当前 story 的旧分卷，再按卷写入 `story_volume_outlines` 表，并返回最新 story 详情。
+
+### Python FastAPI
+
+- [x] 新增 `POST /api/story/volume-outline`。
+- [x] 新增分卷大纲提示词，明确要求分卷剧情尽可能丰富，包含更多情节点、冲突、反转、角色选择、情绪钩子和卷末悬念。
+- [x] 分卷大纲使用 `with_structured_output(VolumeOutlineOutput)` 固定返回 `volumes` 数组，每一项包含卷号、卷名、摘要、详细内容和卷末钩子。
+- [x] 分卷大纲生成复用控制台进度输出，日志前缀为 `volume-outline`。
+
+### 前端
+
+- [x] 更新 `StoryDetailView.vue`，新增“手动修改大纲/角色”按钮。
+- [x] 手动修改弹窗会基于现有故事摘要、剧情大纲和角色设定预填，支持在现有文本基础上局部修改。
+- [x] 角色设定支持新增、删除、修改姓名、定位、描述、性格/弧光和外观 JSON。
+- [x] 新增“分卷大纲生成”按钮。
+- [x] 新增“分卷大纲”展示板块，生成后自动刷新并按卡片展示数据库中的 `volumeOutlines`。
+- [x] 更新 `storyApi`、`storyStore`、`types/story.ts`，接入手动保存和分卷生成接口。
+
+### 验证结果
+
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] 前端构建成功：`npm run build`。
+- [x] Python 模块导入检查成功。
+- [ ] 未执行真实端到端分卷大纲生成，因为需要你本地执行新增 SQL 并同时启动 MySQL、Java 后端、Python FastAPI 和前端。
+
+### 需要你做的事
+
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260518_create_story_volume_outlines.sql`。
+- [ ] 重启 Java 后端，让 `story_volume_outlines` 表映射和新增接口生效。
+- [ ] 重启 Python FastAPI，让 `/api/story/volume-outline` 生效。
+- [ ] 登录前端后进入任意 story 详情页，先尝试“手动修改大纲/角色”保存，再点击“分卷大纲生成”。
+- [ ] 如果分卷生成报表不存在，请确认上面的 SQL 已经在当前 Java 连接的 `springcloud` 数据库执行。
+- [ ] 上一版 `stories.volume_outline` 单字段方案已经废弃；如果你已经执行过旧 SQL，保留该字段也不影响当前代码运行。
+
+### 2026-05-18 分卷大纲表结构调整
+
+- [x] 根据“一篇故事对应多个分卷大纲”的要求，将分卷大纲从 `stories.volume_outline` 单字段改为 `story_volume_outlines` 一对多表。
+- [x] 删除旧 SQL 文件 `backend/src/main/resources/db/20260517_add_volume_outline.sql`，避免继续引导执行旧的单字段方案。
+- [x] Java 详情查询不再读取 `stories.volume_outline`，解决未执行旧字段 SQL 时 `storyMapper.selectById(storyId)` 因字段不存在报错的问题。
+- [x] Python 分卷生成响应从 `volumeOutline` 字符串改为 `volumes` 数组。
+- [x] 前端分卷大纲板块从单段文本改为多卷卡片列表。
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] 前端构建成功：`npm run build`。
+- [x] Python 模块导入检查成功。

@@ -29,6 +29,34 @@ if tongyi_api_key:
 
 
 promptTemplate_Outline = PromptTemplate.from_template(prompt_Outline)
+prompt_VolumeOutline = """
+You are a senior long-form web novel editor and story architect.
+
+Create a detailed volume-by-volume outline from the existing story outline.
+The output must be in Chinese.
+
+Hard requirements:
+- Generate 5 to 8 volumes.
+- Make the plot as rich and abundant as possible. Do not be brief.
+- Each volume should include many concrete story beats, conflicts, reversals, character choices, emotional hooks, and cliffhangers.
+- Each volume should explain the main goal, core conflict, major antagonist or pressure, key events, character growth, and ending hook.
+- Prefer 800-1200 Chinese characters per volume if the story allows it.
+- The result should help the author start writing each volume directly.
+- Keep continuity with the original story summary, main outline, and character settings.
+
+Story title:
+{Title}
+
+Story summary:
+{StorySummary}
+
+Main story outline:
+{Outline}
+
+Main characters:
+{Characters}
+"""
+promptTemplate_VolumeOutline = PromptTemplate.from_template(prompt_VolumeOutline)
 
 llm = ChatTongyi(
     model="qwen-max",
@@ -41,8 +69,9 @@ app = FastAPI(title="Aisay Python AI Engine")
 
 
 class ConsoleStreamingCallback(BaseCallbackHandler):
-    def __init__(self, trace_id: str):
+    def __init__(self, trace_id: str, scope: str = "story-outline"):
         self.trace_id = trace_id
+        self.scope = scope
         self.started_at = time.perf_counter()
         self.has_streamed_tokens = False
 
@@ -50,33 +79,33 @@ class ConsoleStreamingCallback(BaseCallbackHandler):
         return f"{time.perf_counter() - self.started_at:.1f}s"
 
     def on_chat_model_start(self, serialized, messages, **kwargs) -> None:
-        print(f"[story-outline][{self.trace_id}][{self._elapsed()}] chat model request started", flush=True)
+        print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] chat model request started", flush=True)
 
     def on_llm_start(self, serialized, prompts, **kwargs) -> None:
-        print(f"[story-outline][{self.trace_id}][{self._elapsed()}] llm request started", flush=True)
+        print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] llm request started", flush=True)
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
         if not token:
             return
         if not self.has_streamed_tokens:
             self.has_streamed_tokens = True
-            print(f"[story-outline][{self.trace_id}][{self._elapsed()}] streaming tokens:", flush=True)
+            print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] streaming tokens:", flush=True)
         print(token, end="", flush=True)
 
     def on_llm_end(self, response, **kwargs) -> None:
         if self.has_streamed_tokens:
             print("", flush=True)
-        print(f"[story-outline][{self.trace_id}][{self._elapsed()}] llm response finished", flush=True)
+        print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] llm response finished", flush=True)
 
     def on_llm_error(self, error, **kwargs) -> None:
         if self.has_streamed_tokens:
             print("", flush=True)
-        print(f"[story-outline][{self.trace_id}][{self._elapsed()}] llm error: {error}", flush=True)
+        print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] llm error: {error}", flush=True)
 
 
-def log_progress(trace_id: str, message: str, started_at: float) -> None:
+def log_progress(trace_id: str, message: str, started_at: float, scope: str = "story-outline") -> None:
     elapsed = time.perf_counter() - started_at
-    print(f"[story-outline][{trace_id}][{elapsed:.1f}s] {message}", flush=True)
+    print(f"[{scope}][{trace_id}][{elapsed:.1f}s] {message}", flush=True)
 
 
 class StoryOutlineGenerateRequest(BaseModel):
@@ -120,11 +149,36 @@ class StoryOutlineReviseResponse(BaseModel):
     main_characters: list[MainCharacterSetting] = Field(default_factory=list, alias="mainCharacters")
 
 
+class StoryVolumeOutlineGenerateRequest(BaseModel):
+    user_id: int = Field(alias="userId")
+    story_id: int = Field(alias="storyId")
+    title: str
+    story_summary: str | None = Field(default=None, alias="storySummary")
+    outline: str
+    main_characters: list[MainCharacterSetting] = Field(default_factory=list, alias="mainCharacters")
+
+
+class VolumeOutlineItem(BaseModel):
+    volume_number: int = Field(alias="volumeNumber", description="Volume number, starting from 1")
+    title: str = Field(description="Volume title")
+    summary: str = Field(description="Short summary of this volume")
+    content: str = Field(description="Detailed volume outline with rich plot beats, conflicts, reversals, choices, and emotional hooks")
+    ending_hook: str = Field(alias="endingHook", description="The cliffhanger or hook at the end of this volume")
+
+
+class StoryVolumeOutlineGenerateResponse(BaseModel):
+    volumes: list[VolumeOutlineItem]
+
+
 class NovelOutlineOutput(BaseModel):
     novel_name: str = Field(description="Novel title, concise and recognizable")
     story_summary: str = Field(description="Story summary, 200-300 Chinese characters")
     outline: str = Field(description="Full story outline with setting, main plot, stages, and key characters")
     main_characters: list[MainCharacterSetting] = Field(description="Main character settings, usually 3-5 key characters")
+
+
+class VolumeOutlineOutput(BaseModel):
+    volumes: list[VolumeOutlineItem] = Field(description="5-8 detailed volume outlines")
 
 
 @app.post("/api/story/outline", response_model=StoryOutlineGenerateResponse)
@@ -184,6 +238,44 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
         mainCharacters=[],
     )
     log_progress(trace_id, "revision scaffold response ready", started_at)
+    return response
+
+
+@app.post("/api/story/volume-outline", response_model=StoryVolumeOutlineGenerateResponse)
+def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> StoryVolumeOutlineGenerateResponse:
+    trace_id = uuid.uuid4().hex[:8]
+    started_at = time.perf_counter()
+    scope = "volume-outline"
+    log_progress(
+        trace_id,
+        f"request accepted, user_id={request.user_id}, story_id={request.story_id}, title={request.title}",
+        started_at,
+        scope,
+    )
+
+    characters_text = "\n".join(
+        [
+            f"- {character.name}: {character.role or ''}; {character.description or ''}; {character.personality or ''}"
+            for character in request.main_characters
+        ]
+    ) or "No character settings were provided."
+
+    structured_llm = llm.with_structured_output(VolumeOutlineOutput)
+    chain = promptTemplate_VolumeOutline | structured_llm
+    log_progress(trace_id, "structured volume chain created, invoking Tongyi model", started_at, scope)
+    result = chain.invoke(
+        {
+            "Title": request.title,
+            "StorySummary": request.story_summary or "",
+            "Outline": request.outline,
+            "Characters": characters_text,
+        },
+        config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+    )
+
+    log_progress(trace_id, "model returned volume outline, preparing HTTP response", started_at, scope)
+    response = StoryVolumeOutlineGenerateResponse(volumes=result.volumes)
+    log_progress(trace_id, "response ready", started_at, scope)
     return response
 
 

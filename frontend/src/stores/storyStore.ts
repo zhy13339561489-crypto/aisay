@@ -3,6 +3,7 @@ import { defineStore } from 'pinia';
 import * as storyApi from '../api/storyApi';
 import type {
   StoryDetailResponse,
+  StoryDetailUpdateRequest,
   StoryGenerateRequest,
   StoryOutlineReviseRequest,
   StoryResponse,
@@ -16,6 +17,7 @@ export const useStoryStore = defineStore('story', () => {
   const currentStory = ref<StoryDetailResponse | null>(null);
   const isLoading = ref(false);
   const isGenerating = ref(false);
+  const isGeneratingVolumeOutline = ref(false);
   const pagination = ref({
     current: 1,
     size: DEFAULT_PAGE_SIZE,
@@ -75,6 +77,18 @@ export const useStoryStore = defineStore('story', () => {
     return story;
   }
 
+  async function updateStoryDetail(id: number, data: StoryDetailUpdateRequest) {
+    isLoading.value = true;
+    try {
+      const story = await storyApi.updateStoryDetail(id, data);
+      currentStory.value = story;
+      upsertStory(story);
+      return story;
+    } finally {
+      isLoading.value = false;
+    }
+  }
+
   async function reviseStoryOutline(id: number, data: StoryOutlineReviseRequest) {
     isLoading.value = true;
     try {
@@ -84,6 +98,18 @@ export const useStoryStore = defineStore('story', () => {
       return story;
     } finally {
       isLoading.value = false;
+    }
+  }
+
+  async function generateVolumeOutline(id: number) {
+    isGeneratingVolumeOutline.value = true;
+    try {
+      const story = await storyApi.generateVolumeOutline(id);
+      currentStory.value = story;
+      upsertStory(story);
+      return story;
+    } finally {
+      isGeneratingVolumeOutline.value = false;
     }
   }
 
@@ -109,12 +135,15 @@ export const useStoryStore = defineStore('story', () => {
     pagination,
     isLoading,
     isGenerating,
+    isGeneratingVolumeOutline,
     hasStories,
     fetchStories,
     fetchStoryDetail,
     generateStory,
     updateStory,
+    updateStoryDetail,
     reviseStoryOutline,
+    generateVolumeOutline,
     deleteStory,
   };
 });

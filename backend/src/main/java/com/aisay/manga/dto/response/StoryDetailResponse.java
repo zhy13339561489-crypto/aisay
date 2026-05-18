@@ -15,6 +15,8 @@ public class StoryDetailResponse extends StoryResponse {
 
     private String fullContent;
 
+    private List<VolumeOutlineItem> volumeOutlines;
+
     private List<CharacterItem> characters;
 
     private List<SceneItem> scenes;
@@ -51,5 +53,23 @@ public class StoryDetailResponse extends StoryResponse {
         private String description;
 
         private Map<String, Object> visualElements;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VolumeOutlineItem {
+
+        private Long id;
+
+        private Integer volumeNumber;
+
+        private String title;
+
+        private String summary;
+
+        private String content;
+
+        private String endingHook;
     }
 }

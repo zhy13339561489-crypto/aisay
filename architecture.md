@@ -841,3 +841,9 @@ flowchart LR
 剧情大纲生成链路需要适配大模型调用耗时较长的特点，因此 Java 到 Python FastAPI 的调用只限制连接建立时间，读取响应不设置上限。这样 Python 服务已经接收请求并开始生成后，Java 后端会一直等待最终结构化 JSON 返回，不会因为生成时间长而主动超时中断。
 
 Python `generate_story_outline` 继续使用 `with_structured_output(NovelOutlineOutput)` 约束输出结构，固定返回 `novelName`、`storySummary`、`outline`、`mainCharacters`。同时 Python 控制台会通过 LangChain callback 和阶段日志打印请求接收、模型调用开始、流式 token、模型完成、响应封装等进度；如果当前 Tongyi structured output 链路没有透出 token callback，仍会保留阶段级进度日志，不影响最终结果返回。
+
+## 手动编辑与分卷大纲模块
+
+剧情大纲详情现在拆为三个主要内容区：`stories.full_content` 保存剧情大纲，`characters` 表保存主要角色设定，`story_volume_outlines` 表保存分卷大纲。`stories` 与 `story_volume_outlines` 是一对多关系，一个故事可以拥有多个分卷大纲记录。前端详情页提供“手动修改大纲/角色”弹窗，用户可以基于现有文本直接修改故事摘要、剧情大纲和角色设定；保存时调用 `PUT /api/story/{id}/detail`，Java 后端校验 story 归属后更新 `stories.synopsis`、`stories.full_content`，并用提交的角色列表整体替换当前 story 的 `characters` 数据。
+
+分卷大纲生成由前端详情页“分卷大纲生成”按钮触发，调用 `POST /api/story/{id}/volume-outline/generate`。Java 后端读取当前 story 的标题、摘要、剧情大纲和角色设定，转发给 Python FastAPI `/api/story/volume-outline`。Python 侧通过 LangChain `with_structured_output(VolumeOutlineOutput)` 固定返回 `volumes` 数组，提示词要求每卷尽可能提供更多剧情细节、冲突、反转、角色选择、情绪钩子和卷末悬念。Java 收到结果后会替换当前 story 的旧分卷，并逐条写入 `story_volume_outlines` 表，再返回最新详情给前端展示。

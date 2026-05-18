@@ -10,7 +10,7 @@ export interface StoryResponse {
 }
 
 export interface StoryCharacter {
-  id: number;
+  id?: number;
   name: string;
   role?: string;
   description?: string;
@@ -26,8 +26,18 @@ export interface StoryScene {
   visualElements?: Record<string, unknown>;
 }
 
+export interface StoryVolumeOutline {
+  id: number;
+  volumeNumber: number;
+  title: string;
+  summary?: string;
+  content?: string;
+  endingHook?: string;
+}
+
 export interface StoryDetailResponse extends StoryResponse {
   fullContent?: string;
+  volumeOutlines: StoryVolumeOutline[];
   characters: StoryCharacter[];
   scenes: StoryScene[];
 }
@@ -47,6 +57,12 @@ export interface StoryGenerateRequest {
 
 export interface StoryOutlineReviseRequest {
   suggestion: string;
+}
+
+export interface StoryDetailUpdateRequest {
+  synopsis?: string;
+  fullContent?: string;
+  characters?: StoryCharacter[];
 }
 
 export interface StoryPageResponse {

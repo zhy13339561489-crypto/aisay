@@ -1,5 +1,6 @@
 package com.aisay.manga.service;
 
+import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
 import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.request.StoryUpdateRequest;
@@ -12,6 +13,10 @@ public interface StoryService {
     StoryResponse generateStory(Long userId, StoryGenerateRequest request);
 
     StoryDetailResponse reviseStoryOutline(Long storyId, Long userId, StoryOutlineReviseRequest request);
+
+    StoryDetailResponse updateStoryDetail(Long storyId, Long userId, StoryDetailUpdateRequest request);
+
+    StoryDetailResponse generateVolumeOutline(Long storyId, Long userId);
 
     StoryDetailResponse getStoryDetail(Long storyId, Long userId);
 

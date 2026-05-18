@@ -1,5 +1,6 @@
 package com.aisay.manga.controller;
 
+import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
 import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.request.StoryUpdateRequest;
@@ -32,7 +33,7 @@ public class StoryController {
 
     @PostMapping("/generate")
     public ApiResponse<StoryResponse> generateStory(@Valid @RequestBody StoryGenerateRequest request) {
-        return ApiResponse.success("漫剧生成成功", storyService.generateStory(SecurityUtils.getCurrentUserId(), request));
+        return ApiResponse.success("Story generated", storyService.generateStory(SecurityUtils.getCurrentUserId(), request));
     }
 
     @PostMapping("/{id}/outline/revise")
@@ -40,12 +41,26 @@ public class StoryController {
             @PathVariable Long id,
             @Valid @RequestBody StoryOutlineReviseRequest request
     ) {
-        return ApiResponse.success("大纲修改成功", storyService.reviseStoryOutline(id, SecurityUtils.getCurrentUserId(), request));
+        return ApiResponse.success("Outline revised", storyService.reviseStoryOutline(id, SecurityUtils.getCurrentUserId(), request));
+    }
+
+    @PutMapping("/{id}/detail")
+    public ApiResponse<StoryDetailResponse> updateStoryDetail(
+            @PathVariable Long id,
+            @Valid @RequestBody StoryDetailUpdateRequest request
+    ) {
+        return ApiResponse.success("Story detail updated", storyService.updateStoryDetail(id, SecurityUtils.getCurrentUserId(), request));
+    }
+
+    @PostMapping("/{id}/volume-outline/generate")
+    public ApiResponse<StoryDetailResponse> generateVolumeOutline(@PathVariable Long id) {
+        return ApiResponse.success("Volume outline generated", storyService.generateVolumeOutline(id, SecurityUtils.getCurrentUserId()));
     }
 
     @GetMapping("/{id}")
     public ApiResponse<StoryDetailResponse> getStoryDetail(@PathVariable Long id) {
-        return ApiResponse.success(storyService.getStoryDetail(id, SecurityUtils.getCurrentUserId()));
+        StoryDetailResponse storyDetailResponse = storyService.getStoryDetail(id, SecurityUtils.getCurrentUserId());
+        return ApiResponse.success(storyDetailResponse);
     }
 
     @GetMapping("/list")
@@ -61,12 +76,12 @@ public class StoryController {
             @PathVariable Long id,
             @Valid @RequestBody StoryUpdateRequest request
     ) {
-        return ApiResponse.success("漫剧更新成功", storyService.updateStory(id, SecurityUtils.getCurrentUserId(), request));
+        return ApiResponse.success("Story updated", storyService.updateStory(id, SecurityUtils.getCurrentUserId(), request));
     }
 
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteStory(@PathVariable Long id) {
         storyService.deleteStory(id, SecurityUtils.getCurrentUserId());
-        return ApiResponse.success("漫剧删除成功", null);
+        return ApiResponse.success("Story deleted", null);
     }
 }

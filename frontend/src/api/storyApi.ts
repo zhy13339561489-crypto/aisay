@@ -2,6 +2,7 @@ import request from './index';
 import type { ApiResponse } from '../types/auth';
 import type {
   StoryDetailResponse,
+  StoryDetailUpdateRequest,
   StoryGenerateRequest,
   StoryOutlineReviseRequest,
   StoryPageResponse,
@@ -38,8 +39,18 @@ export async function updateStory(id: number, data: StoryUpdateRequest) {
   return unwrap(response.data);
 }
 
+export async function updateStoryDetail(id: number, data: StoryDetailUpdateRequest) {
+  const response = await request.put<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/detail`, data);
+  return unwrap(response.data);
+}
+
 export async function reviseStoryOutline(id: number, data: StoryOutlineReviseRequest) {
   const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/outline/revise`, data);
+  return unwrap(response.data);
+}
+
+export async function generateVolumeOutline(id: number) {
+  const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-outline/generate`);
   return unwrap(response.data);
 }
 

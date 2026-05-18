@@ -4,6 +4,8 @@ import com.aisay.manga.dto.ai.StoryOutlineGenerateRequest;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
 import com.aisay.manga.dto.ai.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.ai.StoryOutlineReviseResponse;
+import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateRequest;
+import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateResponse;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -21,11 +23,14 @@ public class AiEngineClient {
 
     private final String storyOutlineRevisePath;
 
+    private final String storyVolumeOutlinePath;
+
     public AiEngineClient(
             RestClient.Builder restClientBuilder,
             @Value("${ai.engine.base-url:http://localhost:5000}") String baseUrl,
             @Value("${ai.engine.story-outline-path:/api/story/outline}") String storyOutlinePath,
-            @Value("${ai.engine.story-outline-revise-path:/api/story/outline/revise}") String storyOutlineRevisePath
+            @Value("${ai.engine.story-outline-revise-path:/api/story/outline/revise}") String storyOutlineRevisePath,
+            @Value("${ai.engine.story-volume-outline-path:/api/story/volume-outline}") String storyVolumeOutlinePath
     ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(10));
@@ -37,6 +42,7 @@ public class AiEngineClient {
                 .build();
         this.storyOutlinePath = storyOutlinePath;
         this.storyOutlineRevisePath = storyOutlineRevisePath;
+        this.storyVolumeOutlinePath = storyVolumeOutlinePath;
     }
 
     public StoryOutlineGenerateResponse generateStoryOutline(StoryOutlineGenerateRequest request) {
@@ -70,6 +76,23 @@ public class AiEngineClient {
             return response;
         } catch (RestClientException ex) {
             throw new IllegalStateException("Python 大纲修改接口暂不可用，请确认 FastAPI 服务已启动并实现 " + storyOutlineRevisePath, ex);
+        }
+    }
+
+    public StoryVolumeOutlineGenerateResponse generateVolumeOutline(StoryVolumeOutlineGenerateRequest request) {
+        try {
+            StoryVolumeOutlineGenerateResponse response = restClient.post()
+                    .uri(storyVolumeOutlinePath)
+                    .body(request)
+                    .retrieve()
+                    .body(StoryVolumeOutlineGenerateResponse.class);
+
+            if (response == null) {
+                throw new IllegalStateException("Python AI engine returned empty response");
+            }
+            return response;
+        } catch (RestClientException ex) {
+            throw new IllegalStateException("Python volume outline API is unavailable: " + storyVolumeOutlinePath, ex);
         }
     }
 }

@@ -15,8 +15,16 @@
         </div>
         <div class="hero-actions">
           <el-button @click="router.push('/stories')">返回列表</el-button>
-          <el-button type="primary" @click="openEditDialog">编辑</el-button>
+          <el-button type="primary" @click="openEditDialog">编辑信息</el-button>
+          <el-button type="primary" plain @click="openManualEditDialog">手动修改大纲/角色</el-button>
           <el-button type="success" plain @click="openReviseDialog">大纲修改</el-button>
+          <el-button
+            type="success"
+            :loading="storyStore.isGeneratingVolumeOutline"
+            @click="generateVolumeOutline"
+          >
+            分卷大纲生成
+          </el-button>
           <el-button type="warning" plain @click="ElMessage.info('封面生成将在后续 AI 图片阶段接入')">
             生成封面
           </el-button>
@@ -25,27 +33,66 @@
       </header>
 
       <section class="summary-card">
-        <h2>故事摘要</h2>
+        <div class="section-heading">
+          <h2>故事摘要</h2>
+          <el-button link type="primary" @click="openManualEditDialog">手动修改</el-button>
+        </div>
         <p>{{ story.synopsis || '暂无摘要。' }}</p>
       </section>
 
       <section class="content-grid">
         <article class="panel script-panel">
-          <h2>剧情大纲</h2>
+          <div class="section-heading">
+            <h2>剧情大纲</h2>
+            <el-button link type="primary" @click="openManualEditDialog">手动修改</el-button>
+          </div>
           <p class="script-text">{{ story.fullContent || '暂无剧情大纲。' }}</p>
         </article>
 
         <article class="panel">
-          <h2>主要角色设定</h2>
+          <div class="section-heading">
+            <h2>主要角色设定</h2>
+            <el-button link type="primary" @click="openManualEditDialog">手动修改</el-button>
+          </div>
           <div v-if="story.characters.length > 0" class="character-grid">
             <CharacterCard
               v-for="character in story.characters"
-              :key="character.id"
+              :key="character.id || character.name"
               :character="character"
             />
           </div>
           <el-empty v-else description="暂无角色设定" />
         </article>
+      </section>
+
+      <section class="panel volume-panel">
+        <div class="section-heading">
+          <h2>分卷大纲</h2>
+          <el-button
+            type="success"
+            plain
+            :loading="storyStore.isGeneratingVolumeOutline"
+            @click="generateVolumeOutline"
+          >
+            {{ hasVolumeOutlines ? '重新生成分卷大纲' : '分卷大纲生成' }}
+          </el-button>
+        </div>
+        <div v-if="hasVolumeOutlines" class="volume-list">
+          <article
+            v-for="volume in story.volumeOutlines"
+            :key="volume.id"
+            class="volume-card"
+          >
+            <div class="volume-title-row">
+              <el-tag type="success" effect="light">第 {{ volume.volumeNumber }} 卷</el-tag>
+              <h3>{{ volume.title }}</h3>
+            </div>
+            <p v-if="volume.summary" class="volume-summary">{{ volume.summary }}</p>
+            <p v-if="volume.content" class="script-text">{{ volume.content }}</p>
+            <p v-if="volume.endingHook" class="ending-hook">卷末钩子：{{ volume.endingHook }}</p>
+          </article>
+        </div>
+        <el-empty v-else description="暂无分卷大纲，点击按钮后会根据剧情大纲自动生成。" />
       </section>
     </template>
 
@@ -80,6 +127,76 @@
       </template>
     </el-dialog>
 
+    <el-dialog v-model="manualEditDialogVisible" title="手动修改剧情大纲与角色设定" width="880px">
+      <el-form label-position="top" :model="manualForm">
+        <el-form-item label="故事摘要">
+          <el-input
+            v-model="manualForm.synopsis"
+            type="textarea"
+            :autosize="{ minRows: 3, maxRows: 6 }"
+            maxlength="5000"
+            show-word-limit
+          />
+        </el-form-item>
+        <el-form-item label="剧情大纲">
+          <el-input
+            v-model="manualForm.fullContent"
+            type="textarea"
+            :autosize="{ minRows: 10, maxRows: 18 }"
+          />
+        </el-form-item>
+
+        <div class="manual-characters-header">
+          <h3>角色设定</h3>
+          <el-button type="primary" plain @click="addManualCharacter">新增角色</el-button>
+        </div>
+        <div class="manual-character-list">
+          <el-card v-for="(character, index) in manualForm.characters" :key="index" shadow="never">
+            <template #header>
+              <div class="character-edit-title">
+                <span>角色 {{ index + 1 }}</span>
+                <el-button link type="danger" @click="removeManualCharacter(index)">删除</el-button>
+              </div>
+            </template>
+            <div class="character-edit-grid">
+              <el-form-item label="姓名">
+                <el-input v-model.trim="character.name" maxlength="100" />
+              </el-form-item>
+              <el-form-item label="定位">
+                <el-input v-model.trim="character.role" maxlength="100" />
+              </el-form-item>
+            </div>
+            <el-form-item label="描述">
+              <el-input
+                v-model="character.description"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+              />
+            </el-form-item>
+            <el-form-item label="性格/弧光">
+              <el-input
+                v-model="character.personality"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+              />
+            </el-form-item>
+            <el-form-item label="外观 JSON">
+              <el-input
+                v-model="character.appearanceText"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+                placeholder='例如：{"hair":"黑色短发","clothing":"旧风衣"}'
+              />
+            </el-form-item>
+          </el-card>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="manualEditDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="isManualSaving" @click="saveManualDetail">保存修改</el-button>
+      </template>
+    </el-dialog>
+
     <el-dialog v-model="reviseDialogVisible" title="大纲修改意见" width="560px">
       <el-form label-position="top">
         <el-form-item label="请输入你希望如何修改剧情大纲">
@@ -107,6 +224,15 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
 import CharacterCard from '../components/story/CharacterCard.vue';
 import { useStoryStore } from '../stores/storyStore';
+import type { StoryCharacter } from '../types/story';
+
+interface EditableCharacter {
+  name: string;
+  role: string;
+  description: string;
+  personality: string;
+  appearanceText: string;
+}
 
 const props = defineProps<{
   id: string;
@@ -115,8 +241,10 @@ const props = defineProps<{
 const router = useRouter();
 const storyStore = useStoryStore();
 const editDialogVisible = ref(false);
+const manualEditDialogVisible = ref(false);
 const reviseDialogVisible = ref(false);
 const isSaving = ref(false);
+const isManualSaving = ref(false);
 const isRevising = ref(false);
 const reviseSuggestion = ref('');
 const editForm = reactive({
@@ -125,8 +253,14 @@ const editForm = reactive({
   style: '',
   synopsis: '',
 });
+const manualForm = reactive({
+  synopsis: '',
+  fullContent: '',
+  characters: [] as EditableCharacter[],
+});
 
 const story = computed(() => storyStore.currentStory);
+const hasVolumeOutlines = computed(() => (story.value?.volumeOutlines?.length || 0) > 0);
 
 onMounted(loadStory);
 
@@ -178,6 +312,87 @@ async function saveStory() {
   }
 }
 
+function openManualEditDialog() {
+  if (!story.value) {
+    return;
+  }
+  manualForm.synopsis = story.value.synopsis || '';
+  manualForm.fullContent = story.value.fullContent || '';
+  manualForm.characters = story.value.characters.map(toEditableCharacter);
+  manualEditDialogVisible.value = true;
+}
+
+function toEditableCharacter(character: StoryCharacter): EditableCharacter {
+  return {
+    name: character.name || '',
+    role: character.role || '',
+    description: character.description || '',
+    personality: character.personality || '',
+    appearanceText: character.appearance ? JSON.stringify(character.appearance, null, 2) : '',
+  };
+}
+
+function addManualCharacter() {
+  manualForm.characters.push({
+    name: '',
+    role: '',
+    description: '',
+    personality: '',
+    appearanceText: '',
+  });
+}
+
+function removeManualCharacter(index: number) {
+  manualForm.characters.splice(index, 1);
+}
+
+async function saveManualDetail() {
+  if (!story.value) {
+    return;
+  }
+
+  let characters: StoryCharacter[];
+  try {
+    characters = manualForm.characters
+      .filter((character) => character.name.trim())
+      .map((character) => ({
+        name: character.name.trim(),
+        role: character.role.trim(),
+        description: character.description,
+        personality: character.personality,
+        appearance: parseAppearance(character.appearanceText),
+      }));
+  } catch (error) {
+    ElMessage.warning(error instanceof Error ? error.message : '角色外观 JSON 格式不正确');
+    return;
+  }
+
+  isManualSaving.value = true;
+  try {
+    await storyStore.updateStoryDetail(story.value.id, {
+      synopsis: manualForm.synopsis,
+      fullContent: manualForm.fullContent,
+      characters,
+    });
+    ElMessage.success('剧情大纲和角色设定已保存');
+    manualEditDialogVisible.value = false;
+  } finally {
+    isManualSaving.value = false;
+  }
+}
+
+function parseAppearance(value: string) {
+  const text = value.trim();
+  if (!text) {
+    return undefined;
+  }
+  const parsed = JSON.parse(text) as unknown;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('角色外观必须是 JSON 对象');
+  }
+  return parsed as Record<string, unknown>;
+}
+
 function openReviseDialog() {
   reviseSuggestion.value = '';
   reviseDialogVisible.value = true;
@@ -202,6 +417,18 @@ async function submitOutlineRevision() {
   } finally {
     isRevising.value = false;
   }
+}
+
+async function generateVolumeOutline() {
+  if (!story.value) {
+    return;
+  }
+  if (!story.value.fullContent) {
+    ElMessage.warning('请先生成或填写剧情大纲');
+    return;
+  }
+  await storyStore.generateVolumeOutline(story.value.id);
+  ElMessage.success('分卷大纲已生成并保存');
 }
 
 async function confirmDelete() {
@@ -282,10 +509,24 @@ h3 {
 }
 
 .tag-row,
-.hero-actions {
+.hero-actions,
+.section-heading,
+.manual-characters-header,
+.character-edit-title {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.hero-actions {
+  justify-content: flex-end;
+}
+
+.section-heading,
+.manual-characters-header,
+.character-edit-title {
+  align-items: center;
+  justify-content: space-between;
 }
 
 .summary-card,
@@ -310,21 +551,71 @@ h3 {
   white-space: pre-wrap;
 }
 
-.character-grid {
+.character-grid,
+.manual-character-list {
   display: grid;
   gap: 14px;
   margin-top: 16px;
 }
 
+.character-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.volume-panel {
+  background:
+    radial-gradient(circle at top left, rgba(16, 185, 129, 0.12), transparent 22rem),
+    rgba(255, 255, 255, 0.88);
+}
+
+.volume-list {
+  display: grid;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.volume-card {
+  padding: 18px;
+  border: 1px solid rgba(16, 185, 129, 0.16);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.volume-title-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.volume-summary,
+.ending-hook {
+  margin: 12px 0 0;
+  color: #0f766e;
+  line-height: 1.7;
+  font-weight: 700;
+}
+
+.ending-hook {
+  color: #b45309;
+}
+
 @media (max-width: 900px) {
   .detail-hero,
-  .content-grid {
+  .content-grid,
+  .character-edit-grid {
     grid-template-columns: 1fr;
   }
 
   .detail-hero {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .hero-actions {
+    justify-content: flex-start;
   }
 }
 </style>

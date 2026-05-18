@@ -3,6 +3,9 @@ package com.aisay.manga.service.impl;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateRequest;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
 import com.aisay.manga.dto.ai.StoryOutlineReviseResponse;
+import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateRequest;
+import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateResponse;
+import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
 import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.request.StoryUpdateRequest;
@@ -11,9 +14,11 @@ import com.aisay.manga.dto.response.StoryResponse;
 import com.aisay.manga.entity.Character;
 import com.aisay.manga.entity.ChatSession;
 import com.aisay.manga.entity.Story;
+import com.aisay.manga.entity.StoryVolumeOutline;
 import com.aisay.manga.repository.CharacterMapper;
 import com.aisay.manga.repository.ChatSessionMapper;
 import com.aisay.manga.repository.StoryMapper;
+import com.aisay.manga.repository.StoryVolumeOutlineMapper;
 import com.aisay.manga.service.StoryService;
 import com.aisay.manga.utils.AiEngineClient;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -40,17 +45,21 @@ public class StoryServiceImpl implements StoryService {
 
     private final ChatSessionMapper chatSessionMapper;
 
+    private final StoryVolumeOutlineMapper storyVolumeOutlineMapper;
+
     private final AiEngineClient aiEngineClient;
 
     public StoryServiceImpl(
             StoryMapper storyMapper,
             CharacterMapper characterMapper,
             ChatSessionMapper chatSessionMapper,
+            StoryVolumeOutlineMapper storyVolumeOutlineMapper,
             AiEngineClient aiEngineClient
     ) {
         this.storyMapper = storyMapper;
         this.characterMapper = characterMapper;
         this.chatSessionMapper = chatSessionMapper;
+        this.storyVolumeOutlineMapper = storyVolumeOutlineMapper;
         this.aiEngineClient = aiEngineClient;
     }
 
@@ -112,15 +121,64 @@ public class StoryServiceImpl implements StoryService {
     }
 
     @Override
+    @Transactional
+    public StoryDetailResponse updateStoryDetail(Long storyId, Long userId, StoryDetailUpdateRequest request) {
+        Story story = getOwnedStory(storyId, userId);
+        if (request.getSynopsis() != null) {
+            story.setSynopsis(request.getSynopsis());
+        }
+        if (request.getFullContent() != null) {
+            story.setFullContent(request.getFullContent());
+        }
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+
+        if (request.getCharacters() != null) {
+            characterMapper.delete(new LambdaQueryWrapper<Character>().eq(Character::getStoryId, storyId));
+            saveManualCharacters(storyId, request.getCharacters());
+        }
+
+        return getStoryDetail(storyId, userId);
+    }
+
+    @Override
+    @Transactional
+    public StoryDetailResponse generateVolumeOutline(Long storyId, Long userId) {
+        Story story = getOwnedStory(storyId, userId);
+        List<Character> characters = characterMapper.selectList(new LambdaQueryWrapper<Character>()
+                .eq(Character::getStoryId, storyId)
+                .orderByAsc(Character::getId));
+        StoryVolumeOutlineGenerateResponse response = aiEngineClient.generateVolumeOutline(new StoryVolumeOutlineGenerateRequest(
+                userId,
+                storyId,
+                story.getTitle(),
+                story.getSynopsis(),
+                story.getFullContent(),
+                characters.stream().map(this::toMainCharacterSetting).toList()
+        ));
+
+        storyVolumeOutlineMapper.delete(new LambdaQueryWrapper<StoryVolumeOutline>().eq(StoryVolumeOutline::getStoryId, storyId));
+        saveVolumeOutlines(storyId, response.getVolumes());
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+        return getStoryDetail(storyId, userId);
+    }
+
+    @Override
     public StoryDetailResponse getStoryDetail(Long storyId, Long userId) {
         Story story = getOwnedStory(storyId, userId);
         List<Character> characters = characterMapper.selectList(new LambdaQueryWrapper<Character>()
                 .eq(Character::getStoryId, storyId)
                 .orderByAsc(Character::getId));
+        List<StoryVolumeOutline> volumeOutlines = storyVolumeOutlineMapper.selectList(new LambdaQueryWrapper<StoryVolumeOutline>()
+                .eq(StoryVolumeOutline::getStoryId, storyId)
+                .orderByAsc(StoryVolumeOutline::getVolumeNumber)
+                .orderByAsc(StoryVolumeOutline::getId));
 
         StoryDetailResponse response = new StoryDetailResponse();
         fillStoryResponse(response, story);
         response.setFullContent(story.getFullContent());
+        response.setVolumeOutlines(volumeOutlines.stream().map(this::toVolumeOutlineItem).toList());
         response.setCharacters(characters.stream().map(this::toCharacterItem).toList());
         response.setScenes(List.of());
         return response;
@@ -179,6 +237,42 @@ public class StoryServiceImpl implements StoryService {
         });
     }
 
+    private void saveManualCharacters(Long storyId, List<StoryDetailUpdateRequest.CharacterUpdateItem> characters) {
+        characters.stream()
+                .filter(character -> character.getName() != null && !character.getName().isBlank())
+                .forEach(setting -> {
+                    Character character = new Character();
+                    character.setStoryId(storyId);
+                    character.setName(resolveText(setting.getName(), "Unnamed character"));
+                    character.setRole(resolveText(setting.getRole(), "main character"));
+                    character.setDescription(setting.getDescription());
+                    character.setPersonality(setting.getPersonality());
+                    character.setAppearance(setting.getAppearance());
+                    characterMapper.insert(character);
+                });
+    }
+
+    private void saveVolumeOutlines(Long storyId, List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumes) {
+        if (volumes == null || volumes.isEmpty()) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        for (int index = 0; index < volumes.size(); index++) {
+            StoryVolumeOutlineGenerateResponse.VolumeOutlineItem item = volumes.get(index);
+            StoryVolumeOutline volume = new StoryVolumeOutline();
+            volume.setStoryId(storyId);
+            volume.setVolumeNumber(item.getVolumeNumber() == null ? index + 1 : item.getVolumeNumber());
+            volume.setTitle(resolveText(item.getTitle(), "Volume " + volume.getVolumeNumber()));
+            volume.setSummary(item.getSummary());
+            volume.setContent(item.getContent());
+            volume.setEndingHook(item.getEndingHook());
+            volume.setCreatedAt(now);
+            volume.setUpdatedAt(now);
+            storyVolumeOutlineMapper.insert(volume);
+        }
+    }
+
     private ChatSession getOwnedSession(Long sessionId, Long userId) {
         ChatSession session = chatSessionMapper.selectById(sessionId);
         if (session == null || SESSION_STATUS_DELETED.equals(session.getStatus())) {
@@ -233,6 +327,27 @@ public class StoryServiceImpl implements StoryService {
                 character.getDescription(),
                 character.getPersonality(),
                 character.getAppearance()
+        );
+    }
+
+    private StoryOutlineGenerateResponse.MainCharacterSetting toMainCharacterSetting(Character character) {
+        return new StoryOutlineGenerateResponse.MainCharacterSetting(
+                character.getName(),
+                character.getRole(),
+                character.getDescription(),
+                character.getPersonality(),
+                character.getAppearance()
+        );
+    }
+
+    private StoryDetailResponse.VolumeOutlineItem toVolumeOutlineItem(StoryVolumeOutline volume) {
+        return new StoryDetailResponse.VolumeOutlineItem(
+                volume.getId(),
+                volume.getVolumeNumber(),
+                volume.getTitle(),
+                volume.getSummary(),
+                volume.getContent(),
+                volume.getEndingHook()
         );
     }
 }
