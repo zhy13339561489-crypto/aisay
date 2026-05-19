@@ -29,6 +29,10 @@ public class AiEngineClient {
 
     private final String chatAgentPath;
 
+    /**
+     * 作用：创建访问 Python FastAPI AI 引擎的 HTTP 客户端。
+     * 调用方：Spring 容器启动时自动实例化本组件，StoryServiceImpl 和 ChatServiceImpl 后续注入使用。
+     */
     public AiEngineClient(
             RestClient.Builder restClientBuilder,
             @Value("${ai.engine.base-url:http://localhost:5000}") String baseUrl,
@@ -51,6 +55,10 @@ public class AiEngineClient {
         this.chatAgentPath = chatAgentPath;
     }
 
+    /**
+     * 作用：调用 Python /api/story/outline 生成剧情大纲、故事摘要和主要角色设定。
+     * 调用方：StoryServiceImpl#generateStory。
+     */
     public StoryOutlineGenerateResponse generateStoryOutline(StoryOutlineGenerateRequest request) {
         try {
             StoryOutlineGenerateResponse response = restClient.post()
@@ -68,6 +76,10 @@ public class AiEngineClient {
         }
     }
 
+    /**
+     * 作用：调用 Python /api/story/outline/revise 根据修改意见重写剧情大纲。
+     * 调用方：StoryServiceImpl#reviseStoryOutline。
+     */
     public StoryOutlineReviseResponse reviseStoryOutline(StoryOutlineReviseRequest request) {
         try {
             StoryOutlineReviseResponse response = restClient.post()
@@ -85,6 +97,10 @@ public class AiEngineClient {
         }
     }
 
+    /**
+     * 作用：调用 Python /api/story/volume-outline 根据完整大纲生成分卷大纲。
+     * 调用方：StoryServiceImpl#generateVolumeOutline。
+     */
     public StoryVolumeOutlineGenerateResponse generateVolumeOutline(StoryVolumeOutlineGenerateRequest request) {
         try {
             StoryVolumeOutlineGenerateResponse response = restClient.post()
@@ -102,6 +118,10 @@ public class AiEngineClient {
         }
     }
 
+    /**
+     * 作用：调用 Python /api/chat/agent，让大模型完成问题重写、路由分发并返回 Java 方法名和参数。
+     * 调用方：ChatServiceImpl#runAgentAndDispatch。
+     */
     public ChatAgentResponse runChatAgent(ChatAgentRequest request) {
         try {
             ChatAgentResponse response = restClient.post()

@@ -25,6 +25,10 @@ import java.util.NoSuchElementException;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+    /**
+     * 作用：处理 @Valid 请求体校验失败，并返回字段级错误。
+     * 调用方：Spring MVC 异常处理机制自动调用。
+     */
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Map<String, String>>> handleMethodArgumentNotValid(MethodArgumentNotValidException ex) {
         Map<String, String> errors = new LinkedHashMap<>();
@@ -34,6 +38,10 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(new ApiResponse<>(400, "参数校验失败", errors, LocalDateTime.now()));
     }
 
+    /**
+     * 作用：处理参数约束校验失败，并返回约束路径和错误消息。
+     * 调用方：Spring MVC 异常处理机制自动调用。
+     */
     @ExceptionHandler(ConstraintViolationException.class)
     public ResponseEntity<ApiResponse<Map<String, String>>> handleConstraintViolation(ConstraintViolationException ex) {
         Map<String, String> errors = new LinkedHashMap<>();
@@ -42,6 +50,10 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(new ApiResponse<>(400, "参数校验失败", errors, LocalDateTime.now()));
     }
 
+    /**
+     * 作用：处理请求参数、文件上传等 400 类异常。
+     * 调用方：Spring MVC 异常处理机制自动调用。
+     */
     @ExceptionHandler({
             IllegalArgumentException.class,
             MissingServletRequestParameterException.class,
@@ -53,31 +65,55 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResponse.fail(400, resolveMessage(ex, "请求参数错误")));
     }
 
+    /**
+     * 作用：处理无权限访问异常。
+     * 调用方：Spring Security / Spring MVC 异常处理机制自动调用。
+     */
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiResponse<Void>> handleAccessDenied(AccessDeniedException ex) {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(ApiResponse.fail(403, "无权访问该资源"));
     }
 
+    /**
+     * 作用：处理资源不存在异常。
+     * 调用方：Service 层抛出 NoSuchElementException 后由 Spring MVC 自动调用。
+     */
     @ExceptionHandler(NoSuchElementException.class)
     public ResponseEntity<ApiResponse<Void>> handleNotFound(NoSuchElementException ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.fail(404, resolveMessage(ex, "资源不存在")));
     }
 
+    /**
+     * 作用：处理接口或静态资源不存在异常。
+     * 调用方：Spring MVC 未找到处理器或资源时自动调用。
+     */
     @ExceptionHandler({NoHandlerFoundException.class, NoResourceFoundException.class})
     public ResponseEntity<ApiResponse<Void>> handleNoHandlerFound(Exception ex) {
         return ResponseEntity.status(HttpStatus.NOT_FOUND).body(ApiResponse.fail(404, "接口不存在"));
     }
 
+    /**
+     * 作用：处理文件读写相关异常。
+     * 调用方：LocalFileStorageUtil 抛出 UncheckedIOException 后由 Spring MVC 自动调用。
+     */
     @ExceptionHandler(UncheckedIOException.class)
     public ResponseEntity<ApiResponse<Void>> handleFileIo(UncheckedIOException ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.fail(500, resolveMessage(ex, "文件处理失败")));
     }
 
+    /**
+     * 作用：兜底处理未被前面规则捕获的后端异常。
+     * 调用方：Spring MVC 异常处理机制自动调用。
+     */
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleException(Exception ex) {
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(ApiResponse.fail(500, "服务器内部错误"));
     }
 
+    /**
+     * 作用：优先使用异常消息，没有消息时使用默认提示。
+     * 调用方：handleBadRequest、handleNotFound、handleFileIo。
+     */
     private String resolveMessage(Exception ex, String fallback) {
         if (ex.getMessage() == null || ex.getMessage().isBlank()) {
             return fallback;

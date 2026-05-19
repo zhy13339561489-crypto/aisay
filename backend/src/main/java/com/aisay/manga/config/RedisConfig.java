@@ -10,6 +10,10 @@ import org.springframework.data.redis.serializer.StringRedisSerializer;
 @Configuration
 public class RedisConfig {
 
+    /**
+     * 作用：配置 RedisTemplate 的 key/value 序列化方式。
+     * 调用方：Spring 容器启动时注册 RedisTemplate Bean，业务需要 Redis 时注入使用。
+     */
     @Bean
     public RedisTemplate<String, Object> redisTemplate(RedisConnectionFactory connectionFactory) {
         RedisTemplate<String, Object> template = new RedisTemplate<>();

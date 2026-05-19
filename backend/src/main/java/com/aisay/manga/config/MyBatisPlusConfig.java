@@ -10,6 +10,10 @@ import org.springframework.context.annotation.Configuration;
 @Configuration
 public class MyBatisPlusConfig {
 
+    /**
+     * 作用：配置 MyBatis Plus 分页插件和乐观锁插件。
+     * 调用方：Spring 容器启动时注册 MybatisPlusInterceptor Bean。
+     */
     @Bean
     public MybatisPlusInterceptor mybatisPlusInterceptor() {
         MybatisPlusInterceptor interceptor = new MybatisPlusInterceptor();

@@ -11,6 +11,10 @@ import java.util.List;
 @Mapper
 public interface MessageMapper extends BaseMapper<Message> {
 
+    /**
+     * 作用：按会话 ID 查询消息，并按创建时间和 ID 升序排列。
+     * 调用方：ChatServiceImpl#getHistory。
+     */
     @Select("""
             SELECT *
             FROM messages

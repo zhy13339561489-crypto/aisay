@@ -30,6 +30,10 @@ public class SecurityConfig {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * 作用：注入 JWT 过滤器、CORS 配置和 JSON 序列化工具。
+     * 调用方：Spring 容器启动时自动构造 SecurityConfig。
+     */
     public SecurityConfig(
             JwtAuthenticationFilter jwtAuthenticationFilter,
             CorsConfigurationSource corsConfigurationSource,
@@ -40,6 +44,10 @@ public class SecurityConfig {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 作用：配置无状态 JWT 安全过滤器链、公开接口和未认证响应。
+     * 调用方：Spring Security 启动时读取该 Bean 构建过滤器链。
+     */
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http.csrf(AbstractHttpConfigurer::disable)
@@ -71,11 +79,19 @@ public class SecurityConfig {
         return http.build();
     }
 
+    /**
+     * 作用：提供 BCrypt 密码编码器。
+     * 调用方：UserServiceImpl 注册和登录校验密码时注入使用。
+     */
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
     }
 
+    /**
+     * 作用：提供占位 UserDetailsService；当前项目使用 JWT userId，不走传统用户名加载流程。
+     * 调用方：Spring Security 自动装配需要 UserDetailsService 时使用。
+     */
     @Bean
     public UserDetailsService userDetailsService() {
         return username -> {

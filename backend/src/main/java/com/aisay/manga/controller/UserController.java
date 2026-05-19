@@ -22,25 +22,45 @@ public class UserController {
 
     private final UserService userService;
 
+    /**
+     * 作用：注入用户服务。
+     * 调用方：Spring 容器启动时自动构造 UserController。
+     */
     public UserController(UserService userService) {
         this.userService = userService;
     }
 
+    /**
+     * 作用：注册新用户并返回用户资料。
+     * 调用方：前端注册页提交后请求 POST /api/auth/register。
+     */
     @PostMapping("/auth/register")
     public ApiResponse<UserProfileResponse> register(@Valid @RequestBody RegisterRequest request) {
         return ApiResponse.success("注册成功", userService.register(request));
     }
 
+    /**
+     * 作用：校验用户名密码并返回 JWT 登录令牌。
+     * 调用方：前端登录页提交后请求 POST /api/auth/login。
+     */
     @PostMapping("/auth/login")
     public ApiResponse<LoginResponse> login(@Valid @RequestBody LoginRequest request) {
         return ApiResponse.success("登录成功", userService.login(request));
     }
 
+    /**
+     * 作用：查询当前登录用户资料。
+     * 调用方：前端用户资料初始化时请求 GET /api/user/profile。
+     */
     @GetMapping("/user/profile")
     public ApiResponse<UserProfileResponse> getProfile() {
         return ApiResponse.success(userService.getProfile(SecurityUtils.getCurrentUserId()));
     }
 
+    /**
+     * 作用：更新当前登录用户资料。
+     * 调用方：前端用户资料保存时请求 PUT /api/user/profile。
+     */
     @PutMapping("/user/profile")
     public ApiResponse<UserProfileResponse> updateProfile(@Valid @RequestBody UserUpdateRequest request) {
         return ApiResponse.success("更新成功", userService.updateProfile(SecurityUtils.getCurrentUserId(), request));

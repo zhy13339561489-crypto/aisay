@@ -49,6 +49,10 @@ public class StoryServiceImpl implements StoryService {
 
     private final AiEngineClient aiEngineClient;
 
+    /**
+     * 作用：注入故事、角色、会话、分卷大纲数据访问对象，以及 Python AI 引擎客户端。
+     * 调用方：Spring 容器启动时自动构造 StoryServiceImpl。
+     */
     public StoryServiceImpl(
             StoryMapper storyMapper,
             CharacterMapper characterMapper,
@@ -63,6 +67,10 @@ public class StoryServiceImpl implements StoryService {
         this.aiEngineClient = aiEngineClient;
     }
 
+    /**
+     * 作用：调用 Python 生成剧情大纲，并把标题、摘要、完整大纲和角色设定保存到会话绑定的漫剧。
+     * 调用方：StoryController#generateStory。
+     */
     @Override
     @Transactional
     public StoryResponse generateStory(Long userId, StoryGenerateRequest request) {
@@ -91,6 +99,10 @@ public class StoryServiceImpl implements StoryService {
         return toStoryResponse(story);
     }
 
+    /**
+     * 作用：调用 Python 大纲修改接口，根据用户修改意见更新故事摘要、大纲和角色设定。
+     * 调用方：StoryController#reviseStoryOutline。
+     */
     @Override
     @Transactional
     public StoryDetailResponse reviseStoryOutline(Long storyId, Long userId, StoryOutlineReviseRequest request) {
@@ -117,6 +129,10 @@ public class StoryServiceImpl implements StoryService {
         return getStoryDetail(storyId, userId);
     }
 
+    /**
+     * 作用：保存用户手动编辑后的故事摘要、完整大纲和角色设定。
+     * 调用方：StoryController#updateStoryDetail。
+     */
     @Override
     @Transactional
     public StoryDetailResponse updateStoryDetail(Long storyId, Long userId, StoryDetailUpdateRequest request) {
@@ -138,6 +154,10 @@ public class StoryServiceImpl implements StoryService {
         return getStoryDetail(storyId, userId);
     }
 
+    /**
+     * 作用：调用 Python 生成分卷大纲，清空旧分卷记录后保存新分卷记录。
+     * 调用方：StoryController#generateVolumeOutline。
+     */
     @Override
     @Transactional
     public StoryDetailResponse generateVolumeOutline(Long storyId, Long userId) {
@@ -161,6 +181,10 @@ public class StoryServiceImpl implements StoryService {
         return getStoryDetail(storyId, userId);
     }
 
+    /**
+     * 作用：查询故事详情，并组合角色设定、分卷大纲和场景占位列表返回给前端。
+     * 调用方：StoryController#getStoryDetail、reviseStoryOutline、updateStoryDetail、generateVolumeOutline。
+     */
     @Override
     public StoryDetailResponse getStoryDetail(Long storyId, Long userId) {
         Story story = getOwnedStory(storyId, userId);
@@ -181,6 +205,10 @@ public class StoryServiceImpl implements StoryService {
         return response;
     }
 
+    /**
+     * 作用：分页查询当前用户的故事列表。
+     * 调用方：StoryController#getUserStories。
+     */
     @Override
     public Page<StoryResponse> getUserStories(Long userId, int page, int size) {
         Page<Story> storyPage = storyMapper.selectPageByUserId(new Page<>(Math.max(page, 1), Math.max(size, 1)), userId);
@@ -189,6 +217,10 @@ public class StoryServiceImpl implements StoryService {
         return responsePage;
     }
 
+    /**
+     * 作用：更新故事基础字段，包括标题、题材、风格和摘要。
+     * 调用方：StoryController#updateStory。
+     */
     @Override
     @Transactional
     public StoryResponse updateStory(Long storyId, Long userId, StoryUpdateRequest request) {
@@ -210,6 +242,10 @@ public class StoryServiceImpl implements StoryService {
         return toStoryResponse(story);
     }
 
+    /**
+     * 作用：删除当前用户拥有的故事记录。
+     * 调用方：StoryController#deleteStory。
+     */
     @Override
     @Transactional
     public void deleteStory(Long storyId, Long userId) {
@@ -217,6 +253,10 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.deleteById(story.getId());
     }
 
+    /**
+     * 作用：保存 AI 返回的结构化主要角色设定。
+     * 调用方：generateStory、reviseStoryOutline。
+     */
     private void saveMainCharacters(Long storyId, List<StoryOutlineGenerateResponse.MainCharacterSetting> mainCharacters) {
         if (mainCharacters == null || mainCharacters.isEmpty()) {
             return;
@@ -234,6 +274,10 @@ public class StoryServiceImpl implements StoryService {
         });
     }
 
+    /**
+     * 作用：读取并校验会话绑定的故事，确保生成大纲不会写入错误用户的故事。
+     * 调用方：generateStory。
+     */
     private Story resolveBoundStory(ChatSession session, Long userId, String genre, LocalDateTime now) {
         if (session.getStoryId() != null) {
             Story story = storyMapper.selectById(session.getStoryId());
@@ -244,6 +288,10 @@ public class StoryServiceImpl implements StoryService {
         throw new IllegalStateException("This session is not bound to a valid story. Please create a new session and select a story.");
     }
 
+    /**
+     * 作用：保存用户手动编辑后的角色设定。
+     * 调用方：updateStoryDetail。
+     */
     private void saveManualCharacters(Long storyId, List<StoryDetailUpdateRequest.CharacterUpdateItem> characters) {
         characters.stream()
                 .filter(character -> character.getName() != null && !character.getName().isBlank())
@@ -259,6 +307,10 @@ public class StoryServiceImpl implements StoryService {
                 });
     }
 
+    /**
+     * 作用：将 Python 返回的分卷大纲列表保存到 story_volume_outlines 表。
+     * 调用方：generateVolumeOutline。
+     */
     private void saveVolumeOutlines(Long storyId, List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumes) {
         if (volumes == null || volumes.isEmpty()) {
             return;
@@ -280,6 +332,10 @@ public class StoryServiceImpl implements StoryService {
         }
     }
 
+    /**
+     * 作用：校验会话存在、未删除且属于当前用户。
+     * 调用方：generateStory。
+     */
     private ChatSession getOwnedSession(Long sessionId, Long userId) {
         ChatSession session = chatSessionMapper.selectById(sessionId);
         if (session == null || SESSION_STATUS_DELETED.equals(session.getStatus())) {
@@ -291,6 +347,10 @@ public class StoryServiceImpl implements StoryService {
         return session;
     }
 
+    /**
+     * 作用：校验故事存在且属于当前用户。
+     * 调用方：reviseStoryOutline、updateStoryDetail、generateVolumeOutline、getStoryDetail、updateStory、deleteStory。
+     */
     private Story getOwnedStory(Long storyId, Long userId) {
         Story story = storyMapper.selectById(storyId);
         if (story == null) {
@@ -302,12 +362,20 @@ public class StoryServiceImpl implements StoryService {
         return story;
     }
 
+    /**
+     * 作用：将 Story 实体转换为故事列表/基础信息响应 DTO。
+     * 调用方：generateStory、getUserStories、updateStory。
+     */
     private StoryResponse toStoryResponse(Story story) {
         StoryResponse response = new StoryResponse();
         fillStoryResponse(response, story);
         return response;
     }
 
+    /**
+     * 作用：为空字符串或空值提供兜底文本。
+     * 调用方：generateStory、reviseStoryOutline、saveMainCharacters、saveManualCharacters、saveVolumeOutlines。
+     */
     private String resolveText(String value, String fallback) {
         if (value == null || value.isBlank()) {
             return fallback;
@@ -315,6 +383,10 @@ public class StoryServiceImpl implements StoryService {
         return value;
     }
 
+    /**
+     * 作用：把 Story 公共字段填充到 StoryResponse 及其子类 StoryDetailResponse。
+     * 调用方：toStoryResponse、getStoryDetail。
+     */
     private void fillStoryResponse(StoryResponse response, Story story) {
         response.setId(story.getId());
         response.setTitle(story.getTitle());
@@ -326,6 +398,10 @@ public class StoryServiceImpl implements StoryService {
         response.setCreatedAt(story.getCreatedAt());
     }
 
+    /**
+     * 作用：将角色实体转换为故事详情中的角色 DTO。
+     * 调用方：getStoryDetail。
+     */
     private StoryDetailResponse.CharacterItem toCharacterItem(Character character) {
         return new StoryDetailResponse.CharacterItem(
                 character.getId(),
@@ -337,6 +413,10 @@ public class StoryServiceImpl implements StoryService {
         );
     }
 
+    /**
+     * 作用：将数据库角色实体转换为 Python 分卷大纲接口需要的角色设定 DTO。
+     * 调用方：generateVolumeOutline。
+     */
     private StoryOutlineGenerateResponse.MainCharacterSetting toMainCharacterSetting(Character character) {
         return new StoryOutlineGenerateResponse.MainCharacterSetting(
                 character.getName(),
@@ -347,6 +427,10 @@ public class StoryServiceImpl implements StoryService {
         );
     }
 
+    /**
+     * 作用：将分卷大纲实体转换为故事详情中的分卷大纲 DTO。
+     * 调用方：getStoryDetail。
+     */
     private StoryDetailResponse.VolumeOutlineItem toVolumeOutlineItem(StoryVolumeOutline volume) {
         return new StoryDetailResponse.VolumeOutlineItem(
                 volume.getId(),

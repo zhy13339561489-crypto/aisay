@@ -38,12 +38,20 @@ public class LocalFileStorageUtil {
 
     private final long maxFileSizeBytes;
 
+    /**
+     * 作用：初始化本地存储根目录和单文件大小限制。
+     * 调用方：StorageConfig#localFileStorageUtil。
+     */
     public LocalFileStorageUtil(String rootPath, long maxFileSizeBytes) {
         this.rootPath = Paths.get(rootPath).toAbsolutePath().normalize();
         this.maxFileSizeBytes = maxFileSizeBytes;
         createDirectories();
     }
 
+    /**
+     * 作用：校验并保存上传文件，返回数据库/前端可保存的相对路径。
+     * 调用方：FileController#uploadFile。
+     */
     public String saveFile(MultipartFile file, String category) {
         String safeCategory = validateCategory(category);
         validateFile(file);
@@ -65,6 +73,10 @@ public class LocalFileStorageUtil {
         return toRelativePath(safeCategory, date, fileName);
     }
 
+    /**
+     * 作用：根据相对路径加载本地文件资源。
+     * 调用方：FileController#getFile。
+     */
     public Resource loadFile(String filePath) {
         Path file = resolveRelativeFile(filePath);
         try {
@@ -78,6 +90,10 @@ public class LocalFileStorageUtil {
         }
     }
 
+    /**
+     * 作用：根据相对路径删除本地文件。
+     * 调用方：FileController#deleteFile。
+     */
     public boolean deleteFile(String filePath) {
         Path file = resolveRelativeFile(filePath);
         try {
@@ -87,10 +103,18 @@ public class LocalFileStorageUtil {
         }
     }
 
+    /**
+     * 作用：把存储相对路径转换成前端可访问的 API URL。
+     * 调用方：FileController#uploadFile。
+     */
     public String getFileUrl(String filePath) {
         return "/api/files/" + normalizeRelativePath(filePath);
     }
 
+    /**
+     * 作用：从 URL 路径片段构造安全的文件相对路径。
+     * 调用方：FileController#getFile、FileController#deleteFile。
+     */
     public String buildRelativePath(String category, String date, String filename) {
         String safeCategory = validateCategory(category);
         validateDate(date);
@@ -98,6 +122,10 @@ public class LocalFileStorageUtil {
         return toRelativePath(safeCategory, date, filename);
     }
 
+    /**
+     * 作用：创建存储根目录和常用分类目录。
+     * 调用方：LocalFileStorageUtil 构造函数。
+     */
     private void createDirectories() {
         try {
             Files.createDirectories(rootPath);
@@ -109,6 +137,10 @@ public class LocalFileStorageUtil {
         }
     }
 
+    /**
+     * 作用：校验上传文件是否为空、大小、扩展名和内容类型是否合法。
+     * 调用方：saveFile。
+     */
     private void validateFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("上传文件不能为空");
@@ -130,6 +162,10 @@ public class LocalFileStorageUtil {
         }
     }
 
+    /**
+     * 作用：校验文件分类路径片段，防止目录穿越和非法字符。
+     * 调用方：saveFile、buildRelativePath。
+     */
     private String validateCategory(String category) {
         if (category == null || category.isBlank()) {
             throw new IllegalArgumentException("文件分类不能为空");
@@ -141,12 +177,20 @@ public class LocalFileStorageUtil {
         return normalized;
     }
 
+    /**
+     * 作用：校验日期路径片段必须为 yyyy-MM-dd。
+     * 调用方：buildRelativePath。
+     */
     private void validateDate(String date) {
         if (date == null || !DATE_SEGMENT.matcher(date).matches()) {
             throw new IllegalArgumentException("文件日期路径无效");
         }
     }
 
+    /**
+     * 作用：校验文件名不为空且不包含路径分隔符或目录穿越。
+     * 调用方：validateFile、buildRelativePath。
+     */
     private void validateFilename(String filename) {
         if (filename == null || filename.isBlank()) {
             throw new IllegalArgumentException("文件名不能为空");
@@ -156,6 +200,10 @@ public class LocalFileStorageUtil {
         }
     }
 
+    /**
+     * 作用：从文件名提取小写扩展名。
+     * 调用方：saveFile、validateFile。
+     */
     private String getFileExtension(String filename) {
         int dotIndex = filename.lastIndexOf('.');
         if (dotIndex < 0 || dotIndex == filename.length() - 1) {
@@ -164,6 +212,10 @@ public class LocalFileStorageUtil {
         return filename.substring(dotIndex + 1).toLowerCase(Locale.ROOT);
     }
 
+    /**
+     * 作用：把相对路径解析为存储根目录下的绝对路径，并校验不越界。
+     * 调用方：loadFile、deleteFile。
+     */
     private Path resolveRelativeFile(String filePath) {
         String normalizedPath = normalizeRelativePath(filePath);
         Path file = rootPath.resolve(normalizedPath).normalize();
@@ -171,18 +223,30 @@ public class LocalFileStorageUtil {
         return file;
     }
 
+    /**
+     * 作用：根据分类和日期解析安全的目标目录路径。
+     * 调用方：saveFile。
+     */
     private Path resolveSafePath(String category, String date) {
         Path path = rootPath.resolve(category).resolve(date).normalize();
         ensureInsideRoot(path);
         return path;
     }
 
+    /**
+     * 作用：确认目标路径仍位于存储根目录内，防止目录穿越。
+     * 调用方：saveFile、resolveRelativeFile、resolveSafePath。
+     */
     private void ensureInsideRoot(Path path) {
         if (!path.normalize().startsWith(rootPath)) {
             throw new IllegalArgumentException("文件路径越界");
         }
     }
 
+    /**
+     * 作用：标准化相对路径分隔符并拒绝绝对路径或目录穿越。
+     * 调用方：getFileUrl、resolveRelativeFile。
+     */
     private String normalizeRelativePath(String filePath) {
         if (filePath == null || filePath.isBlank()) {
             throw new IllegalArgumentException("文件路径不能为空");
@@ -194,6 +258,10 @@ public class LocalFileStorageUtil {
         return normalized;
     }
 
+    /**
+     * 作用：把分类、日期和文件名拼成统一的相对路径格式。
+     * 调用方：saveFile、buildRelativePath。
+     */
     private String toRelativePath(String category, String date, String filename) {
         return category + "/" + date + "/" + filename;
     }

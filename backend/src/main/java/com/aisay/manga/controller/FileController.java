@@ -22,10 +22,18 @@ public class FileController {
 
     private final LocalFileStorageUtil fileStorageUtil;
 
+    /**
+     * 作用：注入本地文件存储工具。
+     * 调用方：Spring 容器启动时自动构造 FileController。
+     */
     public FileController(LocalFileStorageUtil fileStorageUtil) {
         this.fileStorageUtil = fileStorageUtil;
     }
 
+    /**
+     * 作用：上传文件到本地存储目录并返回可访问路径。
+     * 调用方：前端上传头像、封面或资源文件时请求 POST /api/files/upload。
+     */
     @PostMapping("/upload")
     public ApiResponse<FileUploadResponse> uploadFile(
             @RequestParam("file") MultipartFile file,
@@ -42,6 +50,10 @@ public class FileController {
         return ApiResponse.success("文件上传成功", response);
     }
 
+    /**
+     * 作用：按分类、日期和文件名读取本地文件资源。
+     * 调用方：浏览器访问文件 URL /api/files/{category}/{date}/{filename}。
+     */
     @GetMapping("/{category}/{date}/{filename:.+}")
     public ResponseEntity<Resource> getFile(
             @PathVariable String category,
@@ -56,6 +68,10 @@ public class FileController {
                 .body(resource);
     }
 
+    /**
+     * 作用：删除指定本地文件。
+     * 调用方：前端资源删除操作请求 DELETE /api/files/{category}/{date}/{filename}。
+     */
     @DeleteMapping("/{category}/{date}/{filename:.+}")
     public ApiResponse<Void> deleteFile(
             @PathVariable String category,

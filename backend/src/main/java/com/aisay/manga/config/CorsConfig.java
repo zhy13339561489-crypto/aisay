@@ -11,6 +11,10 @@ import java.util.List;
 @Configuration
 public class CorsConfig {
 
+    /**
+     * 作用：配置允许前端开发服务器访问后端 API 的 CORS 策略。
+     * 调用方：Spring Security 的 cors 配置读取该 Bean。
+     */
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();

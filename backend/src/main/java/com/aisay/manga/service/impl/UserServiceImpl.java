@@ -26,12 +26,20 @@ public class UserServiceImpl implements UserService {
 
     private final JwtUtil jwtUtil;
 
+    /**
+     * 作用：注入用户数据访问、密码编码和 JWT 工具。
+     * 调用方：Spring 容器启动时自动构造 UserServiceImpl。
+     */
     public UserServiceImpl(UserMapper userMapper, PasswordEncoder passwordEncoder, JwtUtil jwtUtil) {
         this.userMapper = userMapper;
         this.passwordEncoder = passwordEncoder;
         this.jwtUtil = jwtUtil;
     }
 
+    /**
+     * 作用：注册用户，校验用户名和邮箱唯一性后写入用户表。
+     * 调用方：UserController#register。
+     */
     @Override
     @Transactional
     public UserProfileResponse register(RegisterRequest request) {
@@ -47,6 +55,10 @@ public class UserServiceImpl implements UserService {
         return toProfileResponse(userMapper.selectById(user.getId()));
     }
 
+    /**
+     * 作用：校验用户名密码，成功后签发 JWT。
+     * 调用方：UserController#login。
+     */
     @Override
     public LoginResponse login(LoginRequest request) {
         User user = userMapper.selectOne(new LambdaQueryWrapper<User>()
@@ -61,11 +73,19 @@ public class UserServiceImpl implements UserService {
         return new LoginResponse(token, user.getId(), user.getUsername());
     }
 
+    /**
+     * 作用：查询用户资料并转换为响应 DTO。
+     * 调用方：UserController#getProfile。
+     */
     @Override
     public UserProfileResponse getProfile(Long userId) {
         return toProfileResponse(getUserById(userId));
     }
 
+    /**
+     * 作用：更新用户名、邮箱和头像路径，并校验唯一性。
+     * 调用方：UserController#updateProfile。
+     */
     @Override
     @Transactional
     public UserProfileResponse updateProfile(Long userId, UserUpdateRequest request) {
@@ -91,6 +111,10 @@ public class UserServiceImpl implements UserService {
         return toProfileResponse(userMapper.selectById(userId));
     }
 
+    /**
+     * 作用：按用户 ID 查询用户，不存在时抛出 404 语义异常。
+     * 调用方：getProfile、updateProfile。
+     */
     private User getUserById(Long userId) {
         User user = userMapper.selectById(userId);
         if (user == null) {
@@ -99,6 +123,10 @@ public class UserServiceImpl implements UserService {
         return user;
     }
 
+    /**
+     * 作用：校验用户名是否可用，更新自己资料时允许当前用户保留原用户名。
+     * 调用方：register、updateProfile。
+     */
     private void ensureUsernameAvailable(String username, Long currentUserId) {
         User existing = userMapper.selectOne(new LambdaQueryWrapper<User>()
                 .eq(User::getUsername, username)
@@ -108,6 +136,10 @@ public class UserServiceImpl implements UserService {
         }
     }
 
+    /**
+     * 作用：校验邮箱是否可用，更新自己资料时允许当前用户保留原邮箱。
+     * 调用方：register、updateProfile。
+     */
     private void ensureEmailAvailable(String email, Long currentUserId) {
         User existing = userMapper.selectOne(new LambdaQueryWrapper<User>()
                 .eq(User::getEmail, email)
@@ -117,6 +149,10 @@ public class UserServiceImpl implements UserService {
         }
     }
 
+    /**
+     * 作用：将 User 实体转换为用户资料响应 DTO。
+     * 调用方：register、getProfile、updateProfile。
+     */
     private UserProfileResponse toProfileResponse(User user) {
         return new UserProfileResponse(
                 user.getId(),

@@ -60,6 +60,10 @@ public class ChatServiceImpl implements ChatService {
 
     private final ObjectMapper objectMapper;
 
+    /**
+     * 作用：注入聊天、消息、故事、角色数据访问对象，以及 Python AI 引擎客户端。
+     * 调用方：Spring 容器启动时自动构造 ChatServiceImpl。
+     */
     public ChatServiceImpl(
             ChatSessionMapper chatSessionMapper,
             MessageMapper messageMapper,
@@ -76,6 +80,10 @@ public class ChatServiceImpl implements ChatService {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 作用：创建一个绑定到指定漫剧的聊天会话。
+     * 调用方：ChatController#startSession。
+     */
     @Override
     @Transactional
     public ChatSessionResponse startSession(Long userId, ChatStartRequest request) {
@@ -98,6 +106,10 @@ public class ChatServiceImpl implements ChatService {
         return toSessionResponse(session);
     }
 
+    /**
+     * 作用：查询会话历史消息，并按创建时间升序转换为前端响应对象。
+     * 调用方：ChatController#getHistory。
+     */
     @Override
     public List<MessageResponse> getHistory(Long sessionId, Long userId) {
         getOwnedActiveSession(sessionId, userId);
@@ -107,6 +119,10 @@ public class ChatServiceImpl implements ChatService {
                 .toList();
     }
 
+    /**
+     * 作用：软删除聊天会话，保留数据库记录但不再展示给用户。
+     * 调用方：ChatController#deleteSession。
+     */
     @Override
     @Transactional
     public void deleteSession(Long sessionId, Long userId) {
@@ -116,6 +132,10 @@ public class ChatServiceImpl implements ChatService {
         chatSessionMapper.updateById(session);
     }
 
+    /**
+     * 作用：查询当前用户所有未删除会话，并按最近活跃时间倒序返回。
+     * 调用方：ChatController#getUserSessions。
+     */
     @Override
     public List<ChatSessionResponse> getUserSessions(Long userId) {
         return chatSessionMapper.selectList(new LambdaQueryWrapper<ChatSession>()
@@ -128,6 +148,10 @@ public class ChatServiceImpl implements ChatService {
                 .toList();
     }
 
+    /**
+     * 作用：保存用户消息，调用 Python Chat Agent，按 Agent 返回的 Java 方法更新绑定漫剧，再保存 AI 回复。
+     * 调用方：ChatController#sendMessage。
+     */
     @Override
     @Transactional
     public MessageResponse sendMessage(Long userId, SendMessageRequest request) {
@@ -153,6 +177,10 @@ public class ChatServiceImpl implements ChatService {
         return toMessageResponse(aiMessage);
     }
 
+    /**
+     * 作用：把当前会话、绑定漫剧和用户消息发给 Python Agent，并执行 Agent 返回的白名单 Java 方法。
+     * 调用方：sendMessage。
+     */
     private String runAgentAndDispatch(Long userId, ChatSession session, Story story, String userMessage) {
         try {
             ChatAgentResponse response = aiEngineClient.runChatAgent(new ChatAgentRequest(
@@ -171,6 +199,10 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
+    /**
+     * 作用：根据 Python 返回的 javaMethod 做白名单分发，避免 Python 任意指定后端方法。
+     * 调用方：runAgentAndDispatch。
+     */
     private void dispatchJavaMethod(Story story, ChatAgentResponse response) {
         String method = resolveText(response.getJavaMethod(), METHOD_NONE);
         if (METHOD_NONE.equals(method)) {
@@ -183,6 +215,10 @@ public class ChatServiceImpl implements ChatService {
         throw new IllegalArgumentException("Unsupported Java method from Python agent: " + method);
     }
 
+    /**
+     * 作用：执行 story.updateOutline，把 Python 返回的故事摘要、大纲和角色设定同步写入数据库。
+     * 调用方：dispatchJavaMethod。
+     */
     private void updateStoryOutline(Story story, Map<String, Object> args) {
         if (args == null) {
             return;
@@ -212,10 +248,18 @@ public class ChatServiceImpl implements ChatService {
         }
     }
 
+    /**
+     * 作用：把 Python 返回参数中的任意对象安全转成字符串。
+     * 调用方：updateStoryOutline。
+     */
     private String asString(Object value) {
         return value == null ? null : String.valueOf(value);
     }
 
+    /**
+     * 作用：构造 AI 角色消息实体，等待 sendMessage 统一入库。
+     * 调用方：sendMessage。
+     */
     private Message createAiMessage(Long sessionId, String content) {
         Message aiMessage = new Message();
         aiMessage.setSessionId(sessionId);
@@ -226,6 +270,10 @@ public class ChatServiceImpl implements ChatService {
         return aiMessage;
     }
 
+    /**
+     * 作用：将结构化主要角色设定保存到 characters 表。
+     * 调用方：updateStoryOutline。
+     */
     private void saveMainCharacters(Long storyId, List<StoryOutlineGenerateResponse.MainCharacterSetting> mainCharacters) {
         mainCharacters.forEach(setting -> {
             Character character = new Character();
@@ -239,6 +287,10 @@ public class ChatServiceImpl implements ChatService {
         });
     }
 
+    /**
+     * 作用：校验会话存在、未删除且属于当前用户。
+     * 调用方：getHistory、deleteSession、sendMessage。
+     */
     private ChatSession getOwnedActiveSession(Long sessionId, Long userId) {
         ChatSession session = chatSessionMapper.selectById(sessionId);
         if (session == null || SESSION_STATUS_DELETED.equals(session.getStatus())) {
@@ -250,6 +302,10 @@ public class ChatServiceImpl implements ChatService {
         return session;
     }
 
+    /**
+     * 作用：读取会话绑定的漫剧，并校验漫剧归属当前用户。
+     * 调用方：sendMessage。
+     */
     private Story getBoundStory(ChatSession session, Long userId) {
         if (session.getStoryId() == null) {
             throw new IllegalStateException("This session is not bound to a story. Please create a new session and select a story.");
@@ -257,6 +313,10 @@ public class ChatServiceImpl implements ChatService {
         return getOwnedStory(session.getStoryId(), userId);
     }
 
+    /**
+     * 作用：校验漫剧存在且属于当前用户。
+     * 调用方：startSession、getBoundStory。
+     */
     private Story getOwnedStory(Long storyId, Long userId) {
         Story story = storyMapper.selectById(storyId);
         if (story == null) {
@@ -268,6 +328,10 @@ public class ChatServiceImpl implements ChatService {
         return story;
     }
 
+    /**
+     * 作用：决定新会话标题，用户未填写时默认使用绑定漫剧标题。
+     * 调用方：startSession。
+     */
     private String resolveTitle(ChatStartRequest request, Story story) {
         if (request == null || StringUtils.isBlank(request.getTitle())) {
             return story.getTitle();
@@ -275,6 +339,10 @@ public class ChatServiceImpl implements ChatService {
         return request.getTitle();
     }
 
+    /**
+     * 作用：为空字符串或空值提供兜底文本。
+     * 调用方：runAgentAndDispatch、saveMainCharacters、dispatchJavaMethod。
+     */
     private String resolveText(String value, String fallback) {
         if (StringUtils.isBlank(value)) {
             return fallback;
@@ -282,6 +350,10 @@ public class ChatServiceImpl implements ChatService {
         return value;
     }
 
+    /**
+     * 作用：将 ChatSession 实体转换为前端会话响应 DTO。
+     * 调用方：startSession、getUserSessions。
+     */
     private ChatSessionResponse toSessionResponse(ChatSession session) {
         return new ChatSessionResponse(
                 session.getId(),
@@ -294,6 +366,10 @@ public class ChatServiceImpl implements ChatService {
         );
     }
 
+    /**
+     * 作用：将 Message 实体转换为前端消息响应 DTO。
+     * 调用方：getHistory、sendMessage。
+     */
     private MessageResponse toMessageResponse(Message message) {
         return new MessageResponse(
                 message.getId(),

@@ -20,6 +20,10 @@ public class StorageConfig {
     @Value("${storage.max-request-size:50MB}")
     private String maxRequestSize;
 
+    /**
+     * 作用：配置 multipart 上传的单文件和总请求大小限制。
+     * 调用方：Spring Boot 文件上传组件启动时读取该 Bean。
+     */
     @Bean
     public MultipartConfigElement multipartConfigElement() {
         MultipartConfigFactory factory = new MultipartConfigFactory();
@@ -28,6 +32,10 @@ public class StorageConfig {
         return factory.createMultipartConfig();
     }
 
+    /**
+     * 作用：创建本地文件存储工具 Bean。
+     * 调用方：FileController 注入后处理上传、读取和删除文件。
+     */
     @Bean
     public LocalFileStorageUtil localFileStorageUtil() {
         return new LocalFileStorageUtil(rootPath, DataSize.parse(maxFileSize).toBytes());

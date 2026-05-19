@@ -22,10 +22,18 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtUtil jwtUtil;
 
+    /**
+     * 作用：注入 JWT 工具。
+     * 调用方：Spring 容器启动时自动构造 JwtAuthenticationFilter。
+     */
     public JwtAuthenticationFilter(JwtUtil jwtUtil) {
         this.jwtUtil = jwtUtil;
     }
 
+    /**
+     * 作用：解析 HTTP Authorization Bearer Token，并把用户 ID 写入 Spring Security 上下文。
+     * 调用方：Spring Security 过滤器链在每个请求进入 Controller 前自动调用。
+     */
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {

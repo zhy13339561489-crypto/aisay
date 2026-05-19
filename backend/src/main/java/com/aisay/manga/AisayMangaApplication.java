@@ -8,6 +8,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication
 public class AisayMangaApplication {
 
+    /**
+     * 作用：启动 Spring Boot 后端服务。
+     * 调用方：本地运行或部署启动 com.aisay.manga.AisayMangaApplication 时由 JVM 调用。
+     */
     public static void main(String[] args) {
         SpringApplication.run(AisayMangaApplication.class, args);
     }

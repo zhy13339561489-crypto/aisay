@@ -25,12 +25,20 @@ public class ChatWebSocketController {
 
     private final SimpMessagingTemplate messagingTemplate;
 
+    /**
+     * 作用：注入聊天服务、JWT 工具和 WebSocket 消息模板。
+     * 调用方：Spring 容器启动时自动构造 ChatWebSocketController。
+     */
     public ChatWebSocketController(ChatService chatService, JwtUtil jwtUtil, SimpMessagingTemplate messagingTemplate) {
         this.chatService = chatService;
         this.jwtUtil = jwtUtil;
         this.messagingTemplate = messagingTemplate;
     }
 
+    /**
+     * 作用：接收 STOMP 聊天消息，复用 ChatService 处理后把 AI 回复广播到会话主题。
+     * 调用方：前端 WebSocket 向 /app/chat.send 发送消息时由 Spring Messaging 自动调用。
+     */
     @MessageMapping("/chat.send")
     public void sendMessage(@Valid SendMessageRequest request, SimpMessageHeaderAccessor headerAccessor) {
         Long userId = resolveUserId(headerAccessor);
@@ -41,6 +49,10 @@ public class ChatWebSocketController {
         );
     }
 
+    /**
+     * 作用：从 WebSocket 原生请求头解析 Bearer Token 并提取用户 ID。
+     * 调用方：sendMessage。
+     */
     private Long resolveUserId(SimpMessageHeaderAccessor headerAccessor) {
         String authorization = headerAccessor.getFirstNativeHeader("Authorization");
         if (StringUtils.isBlank(authorization)) {

@@ -12,10 +12,14 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
-from prompt import prompt_Outline
+from prompt import prompt_Outline, prompt_VolumeOutline
 
 
 def load_tongyi_api_key() -> str:
+    """作用：从 python-ai/api.yml 读取通义千问 API Key。
+
+    调用方：模块加载阶段初始化 tongyi_api_key，并写入 DASHSCOPE_API_KEY 环境变量。
+    """
     api_config_path = Path(__file__).with_name("api.yml")
     if not api_config_path.exists():
         return ""
@@ -30,67 +34,34 @@ if tongyi_api_key:
 
 
 promptTemplate_Outline = PromptTemplate.from_template(prompt_Outline)
-prompt_VolumeOutline = """
-You are a senior long-form web novel editor and story architect.
 
-Create a detailed volume-by-volume outline from the existing story outline.
-The output must be in Chinese.
-
-Hard requirements:
-- Generate 5 to 8 volumes.
-- Make the plot as rich and abundant as possible. Do not be brief.
-- Each volume should include many concrete story beats, conflicts, reversals, character choices, emotional hooks, and cliffhangers.
-- Each volume should explain the main goal, core conflict, major antagonist or pressure, key events, character growth, and ending hook.
-- Prefer 800-1200 Chinese characters per volume if the story allows it.
-- The result should help the author start writing each volume directly.
-- Keep continuity with the original story summary, main outline, and character settings.
-
-Story title:
-{Title}
-
-Story summary:
-{StorySummary}
-
-Main story outline:
-{Outline}
-
-Main characters:
-{Characters}
-"""
 promptTemplate_VolumeOutline = PromptTemplate.from_template(prompt_VolumeOutline)
 prompt_ChatAgent = """
-You are the routing and tool-calling agent for an AI comic/story creation system.
-The user is chatting inside a Java-managed conversation that is bound to one story.
+你是路由与工具调用代理（Routing & Tool-Calling Agent）。  
+你运行在对话会话中，该会话已绑定到一个具体的故事项目。你的职责是：理解用户的聊天意图，将其转化为明确的指令，并决定调用哪条链路。
 
-You must do three things:
-1. Rewrite the user question into a clear, standalone instruction.
-2. Decide the route.
-3. Return the exact Java method name and arguments that Java should execute.
+---
 
-Supported Java methods:
-- story.updateOutline
-  Use this when the user wants to modify, polish, expand, shorten, restructure, or continue the bound story outline.
-  javaMethodArgs must include:
-  - storySummary: updated story summary in Chinese
-  - outline: updated complete outline in Chinese
-  - mainCharacters: updated main character settings array
-- story.none
-  Use this when no database mutation should happen, for example greeting, explanation, or when the story has no outline yet.
-  javaMethodArgs should be an empty object.
+核心任务（必须完成以下两项）
 
-Important rules:
-- Only return one of the supported Java methods.
-- If the current outline is empty, do not invent a full story update inside chat. Return story.none and tell the user to generate the story outline first.
-- If updating the outline, preserve useful existing content and apply the user's requested change.
-- The assistantMessage should be a short Chinese response explaining what was done.
+1. 意图理解与指令重写 
+   将用户的自然语言消息重写为一条清晰、完整、无歧义的独立指令。若用户意图模糊，按最合理的创作方向补全。
 
-Bound story:
-Title: {Title}
-Summary: {StorySummary}
-Outline: {Outline}
+2. 路由决策  
+   根据指令判断应调用哪条链路。只允许使用下方列出的方法。
 
-User message:
-{UserMessage}
+---
+
+输出格式要求
+
+你必须返回一个标准 JSON 对象，包含以下字段：
+
+```json
+{
+  "assistantMessage": "简短的中文回复，向用户说明执行了什么操作或给出友好回应",
+  "javaMethod": "Java 方法名，必须是下方列表中的某一个",
+  "javaMethodArgs": { ... }
+}
 """
 promptTemplate_ChatAgent = PromptTemplate.from_template(prompt_ChatAgent)
 
@@ -106,21 +77,41 @@ app = FastAPI(title="Aisay Python AI Engine")
 
 class ConsoleStreamingCallback(BaseCallbackHandler):
     def __init__(self, trace_id: str, scope: str = "story-outline"):
+        """作用：初始化一次大模型调用的控制台流式日志上下文。
+
+        调用方：generate_story_outline、generate_volume_outline、run_chat_agent 在 chain.invoke 的 callbacks 中创建。
+        """
         self.trace_id = trace_id
         self.scope = scope
         self.started_at = time.perf_counter()
         self.has_streamed_tokens = False
 
     def _elapsed(self) -> str:
+        """作用：计算当前请求从开始到现在的耗时文本。
+
+        调用方：本类的 on_chat_model_start、on_llm_start、on_llm_new_token、on_llm_end、on_llm_error。
+        """
         return f"{time.perf_counter() - self.started_at:.1f}s"
 
     def on_chat_model_start(self, serialized, messages, **kwargs) -> None:
+        """作用：在 LangChain ChatModel 请求开始时打印进度。
+
+        调用方：LangChain 回调框架自动调用。
+        """
         print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] chat model request started", flush=True)
 
     def on_llm_start(self, serialized, prompts, **kwargs) -> None:
+        """作用：在 LangChain LLM 请求开始时打印进度。
+
+        调用方：LangChain 回调框架自动调用。
+        """
         print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] llm request started", flush=True)
 
     def on_llm_new_token(self, token: str, **kwargs) -> None:
+        """作用：流式打印大模型生成中的 token，方便在 Python 控制台观察进度。
+
+        调用方：LangChain 回调框架在模型流式返回 token 时自动调用。
+        """
         if not token:
             return
         if not self.has_streamed_tokens:
@@ -129,17 +120,29 @@ class ConsoleStreamingCallback(BaseCallbackHandler):
         print(token, end="", flush=True)
 
     def on_llm_end(self, response, **kwargs) -> None:
+        """作用：在大模型返回结束时补换行并打印完成日志。
+
+        调用方：LangChain 回调框架自动调用。
+        """
         if self.has_streamed_tokens:
             print("", flush=True)
         print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] llm response finished", flush=True)
 
     def on_llm_error(self, error, **kwargs) -> None:
+        """作用：在大模型调用异常时打印错误日志。
+
+        调用方：LangChain 回调框架自动调用。
+        """
         if self.has_streamed_tokens:
             print("", flush=True)
         print(f"[{self.scope}][{self.trace_id}][{self._elapsed()}] llm error: {error}", flush=True)
 
 
 def log_progress(trace_id: str, message: str, started_at: float, scope: str = "story-outline") -> None:
+    """作用：按 trace_id 和业务范围打印阶段性进度日志。
+
+    调用方：generate_story_outline、revise_story_outline、generate_volume_outline、run_chat_agent。
+    """
     elapsed = time.perf_counter() - started_at
     print(f"[{scope}][{trace_id}][{elapsed:.1f}s] {message}", flush=True)
 
@@ -241,6 +244,10 @@ class VolumeOutlineOutput(BaseModel):
 
 @app.post("/api/story/outline", response_model=StoryOutlineGenerateResponse)
 def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutlineGenerateResponse:
+    """作用：根据题材和可选剧情生成结构化剧情大纲、故事摘要和主要角色设定。
+
+    调用方：Java AiEngineClient.generateStoryOutline，即 StoryServiceImpl#generateStory 的 Python 后端接口。
+    """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
     log_progress(
@@ -274,9 +281,10 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
 
 @app.post("/api/story/outline/revise", response_model=StoryOutlineReviseResponse)
 def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineReviseResponse:
-    """Scaffold for outline revision.
+    """作用：接收大纲修改请求并返回临时脚手架结果。
 
-    TODO: replace this placeholder with a LangChain revision chain.
+    调用方：Java AiEngineClient.reviseStoryOutline，即 StoryServiceImpl#reviseStoryOutline 的 Python 后端接口。
+    TODO：后续替换为真正的 LangChain 大纲修改链。
     """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
@@ -301,6 +309,10 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
 
 @app.post("/api/story/volume-outline", response_model=StoryVolumeOutlineGenerateResponse)
 def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> StoryVolumeOutlineGenerateResponse:
+    """作用：基于已保存的剧情大纲和角色设定生成 5 到 8 卷的详细分卷大纲。
+
+    调用方：Java AiEngineClient.generateVolumeOutline，即 StoryServiceImpl#generateVolumeOutline 的 Python 后端接口。
+    """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
     scope = "volume-outline"
@@ -339,6 +351,10 @@ def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> Story
 
 @app.post("/api/chat/agent", response_model=ChatAgentResponse)
 def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
+    """作用：执行对话 Agent，完成问题重写、路由分发，并返回 Java 需要调用的方法名和参数。
+
+    调用方：Java AiEngineClient.runChatAgent，即 ChatServiceImpl#runAgentAndDispatch 的 Python 后端接口。
+    """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
     scope = "chat-agent"

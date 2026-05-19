@@ -10,6 +10,10 @@ import org.apache.ibatis.annotations.Select;
 @Mapper
 public interface StoryMapper extends BaseMapper<Story> {
 
+    /**
+     * 作用：分页查询指定用户的故事，并按更新时间倒序排列。
+     * 调用方：StoryServiceImpl#getUserStories。
+     */
     @Select("""
             SELECT *
             FROM stories
