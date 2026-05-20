@@ -11,7 +11,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 public interface StoryService {
 
     /**
-     * 作用：生成剧情大纲并保存到会话绑定的漫剧。
+     * 作用：生成剧情大纲并新建漫剧。
      * 调用方：StoryController#generateStory。
      */
     StoryResponse generateStory(Long userId, StoryGenerateRequest request);

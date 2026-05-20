@@ -36,7 +36,7 @@ public class StoryController {
     }
 
     /**
-     * 作用：根据题材和可选剧情描述生成漫剧剧情大纲，并保存到当前会话绑定的漫剧。
+     * 作用：根据题材和可选剧情描述生成漫剧剧情大纲，并新建漫剧记录。
      * 调用方：前端“生成剧情大纲/生成漫剧”按钮请求 POST /api/story/generate。
      */
     @PostMapping("/generate")

@@ -132,12 +132,10 @@ def log_progress(trace_id: str, message: str, started_at: float, scope: str = "s
 class StoryOutlineGenerateRequest(BaseModel):
     """剧情大纲生成请求体。
 
-    对应 Java 端 AiEngineClient.generateStoryOutline 的入参，包含用户 ID、会话 ID、题材和可选剧情。
+    对应 Java 端 AiEngineClient.generateStoryOutline 的入参，包含用户 ID、题材和可选剧情。
     """
 
     user_id: int = Field(alias="userId")
-    session_id: int = Field(alias="sessionId")
-    session_title: str | None = Field(default=None, alias="sessionTitle")
     genre: str
     plot: str | None = None
 
@@ -317,7 +315,7 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
     started_at = time.perf_counter()
     log_progress(
         trace_id,
-        f"request accepted, user_id={request.user_id}, session_id={request.session_id}, genre={request.genre}",
+        f"request accepted, user_id={request.user_id}, genre={request.genre}",
         started_at,
     )
 

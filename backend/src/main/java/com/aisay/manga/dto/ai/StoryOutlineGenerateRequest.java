@@ -11,10 +11,6 @@ public class StoryOutlineGenerateRequest {
 
     private Long userId;
 
-    private Long sessionId;
-
-    private String sessionTitle;
-
     private String genre;
 
     private String plot;

@@ -12,11 +12,9 @@ import com.aisay.manga.dto.request.StoryUpdateRequest;
 import com.aisay.manga.dto.response.StoryDetailResponse;
 import com.aisay.manga.dto.response.StoryResponse;
 import com.aisay.manga.entity.Character;
-import com.aisay.manga.entity.ChatSession;
 import com.aisay.manga.entity.Story;
 import com.aisay.manga.entity.StoryVolumeOutline;
 import com.aisay.manga.repository.CharacterMapper;
-import com.aisay.manga.repository.ChatSessionMapper;
 import com.aisay.manga.repository.StoryMapper;
 import com.aisay.manga.repository.StoryVolumeOutlineMapper;
 import com.aisay.manga.service.StoryService;
@@ -33,8 +31,6 @@ import java.util.NoSuchElementException;
 @Service
 public class StoryServiceImpl implements StoryService {
 
-    private static final String SESSION_STATUS_DELETED = "deleted";
-
     private static final String STORY_STATUS_DRAFT = "draft";
 
     private static final String OUTLINE_STYLE = "story_outline";
@@ -42,8 +38,6 @@ public class StoryServiceImpl implements StoryService {
     private final StoryMapper storyMapper;
 
     private final CharacterMapper characterMapper;
-
-    private final ChatSessionMapper chatSessionMapper;
 
     private final StoryVolumeOutlineMapper storyVolumeOutlineMapper;
 
@@ -56,44 +50,42 @@ public class StoryServiceImpl implements StoryService {
     public StoryServiceImpl(
             StoryMapper storyMapper,
             CharacterMapper characterMapper,
-            ChatSessionMapper chatSessionMapper,
             StoryVolumeOutlineMapper storyVolumeOutlineMapper,
             AiEngineClient aiEngineClient
     ) {
         this.storyMapper = storyMapper;
         this.characterMapper = characterMapper;
-        this.chatSessionMapper = chatSessionMapper;
         this.storyVolumeOutlineMapper = storyVolumeOutlineMapper;
         this.aiEngineClient = aiEngineClient;
     }
 
     /**
-     * 作用：调用 Python 生成剧情大纲，并把标题、摘要、完整大纲和角色设定保存到会话绑定的漫剧。
+     * 作用：调用 Python 生成剧情大纲，并新建漫剧记录及其角色设定。
      * 调用方：StoryController#generateStory。
      */
     @Override
     @Transactional
     public StoryResponse generateStory(Long userId, StoryGenerateRequest request) {
-        ChatSession session = getOwnedSession(request.getSessionId(), userId);
         StoryOutlineGenerateResponse outline = aiEngineClient.generateStoryOutline(new StoryOutlineGenerateRequest(
                 userId,
-                session.getId(),
-                session.getTitle(),
                 request.getGenre(),
                 request.getPlot()
         ));
         LocalDateTime now = LocalDateTime.now();
 
-        Story story = resolveBoundStory(session, userId, request.getGenre(), now);
+        Story story = new Story();
+        story.setUserId(userId);
         story.setTitle(resolveText(outline.getNovelName(), request.getGenre() + " story outline"));
         story.setGenre(request.getGenre());
         story.setStyle(OUTLINE_STYLE);
         story.setSynopsis(resolveText(outline.getStorySummary(), request.getPlot()));
         story.setFullContent(resolveText(outline.getOutline(), "Python AI engine did not return an outline."));
         story.setStatus(STORY_STATUS_DRAFT);
+        story.setViewCount(0);
+        story.setLikeCount(0);
+        story.setCreatedAt(now);
         story.setUpdatedAt(now);
-        storyMapper.updateById(story);
-        characterMapper.delete(new LambdaQueryWrapper<Character>().eq(Character::getStoryId, story.getId()));
+        storyMapper.insert(story);
         saveMainCharacters(story.getId(), outline.getMainCharacters());
 
         return toStoryResponse(story);
@@ -275,20 +267,6 @@ public class StoryServiceImpl implements StoryService {
     }
 
     /**
-     * 作用：读取并校验会话绑定的故事，确保生成大纲不会写入错误用户的故事。
-     * 调用方：generateStory。
-     */
-    private Story resolveBoundStory(ChatSession session, Long userId, String genre, LocalDateTime now) {
-        if (session.getStoryId() != null) {
-            Story story = storyMapper.selectById(session.getStoryId());
-            if (story != null && story.getUserId().equals(userId)) {
-                return story;
-            }
-        }
-        throw new IllegalStateException("This session is not bound to a valid story. Please create a new session and select a story.");
-    }
-
-    /**
      * 作用：保存用户手动编辑后的角色设定。
      * 调用方：updateStoryDetail。
      */
@@ -330,21 +308,6 @@ public class StoryServiceImpl implements StoryService {
             volume.setUpdatedAt(now);
             storyVolumeOutlineMapper.insert(volume);
         }
-    }
-
-    /**
-     * 作用：校验会话存在、未删除且属于当前用户。
-     * 调用方：generateStory。
-     */
-    private ChatSession getOwnedSession(Long sessionId, Long userId) {
-        ChatSession session = chatSessionMapper.selectById(sessionId);
-        if (session == null || SESSION_STATUS_DELETED.equals(session.getStatus())) {
-            throw new NoSuchElementException("Session not found");
-        }
-        if (!session.getUserId().equals(userId)) {
-            throw new IllegalArgumentException("No permission to access this session");
-        }
-        return session;
     }
 
     /**

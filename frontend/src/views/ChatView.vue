@@ -69,7 +69,7 @@
         <div v-else class="welcome-card">
           <p>选择一部漫剧，开始对话。</p>
           <h2>每个对话都会绑定一部漫剧</h2>
-          <span>你可以随时生成或重生成剧情大纲，也可以直接输入修改意见来更新当前绑定的漫剧。</span>
+          <span>生成剧情大纲会新建一部漫剧；进入对话前请选择一个已有漫剧进行绑定。</span>
         </div>
       </div>
 
@@ -178,7 +178,6 @@ const pageError = ref('');
 const createDialogVisible = ref(false);
 const outlineDialogVisible = ref(false);
 const outlineFormRef = ref<FormInstance>();
-const openOutlineAfterCreate = ref(false);
 const createForm = reactive({
   storyId: undefined as number | undefined,
   title: '',
@@ -248,8 +247,7 @@ async function syncRouteSession(rawSessionId?: string) {
   }
 }
 
-async function openCreateSessionDialog(shouldOpenOutline = false) {
-  openOutlineAfterCreate.value = shouldOpenOutline;
+async function openCreateSessionDialog() {
   createForm.storyId = undefined;
   createForm.title = '';
   createDialogVisible.value = true;
@@ -271,9 +269,6 @@ async function submitCreateSession() {
     });
     createDialogVisible.value = false;
     router.push(`/chat/${session.id}`);
-    if (openOutlineAfterCreate.value) {
-      openStoryOutlineDialog();
-    }
   } catch (error) {
     pageError.value = getErrorMessage(error);
     ElMessage.error(pageError.value);
@@ -310,7 +305,7 @@ async function handleDeleteSession(sessionId: number) {
 async function handleSendMessage(content: string) {
   if (!chatStore.currentSessionId || !boundStoryId.value) {
     ElMessage.warning('请先新建对话并选择绑定的漫剧');
-    await openCreateSessionDialog(false);
+    await openCreateSessionDialog();
     return;
   }
 
@@ -324,10 +319,6 @@ async function handleSendMessage(content: string) {
 }
 
 async function handleGenerateStory() {
-  if (!chatStore.currentSessionId || !boundStoryId.value) {
-    await openCreateSessionDialog(true);
-    return;
-  }
   openStoryOutlineDialog();
 }
 
@@ -338,7 +329,7 @@ function openStoryOutlineDialog() {
 }
 
 async function submitStoryOutline() {
-  if (!chatStore.currentSessionId || !outlineFormRef.value) {
+  if (!outlineFormRef.value) {
     return;
   }
 
@@ -349,15 +340,12 @@ async function submitStoryOutline() {
 
   await runSafely(async () => {
     const story = await storyStore.generateStory({
-      sessionId: chatStore.currentSessionId as number,
       genre: outlineForm.genre,
       plot: outlineForm.plot || undefined,
     });
     outlineDialogVisible.value = false;
-    await chatStore.loadSessions();
-    chatStore.addLocalAiMessage(`剧情大纲《${story.title}》已更新到当前对话绑定的漫剧。你可以继续在这里提出修改意见。`, chatStore.currentSessionId);
-    ElMessage.success('剧情大纲已更新到当前对话绑定的漫剧');
-    await scrollToBottom();
+    await storyStore.fetchStories(1, 100);
+    ElMessage.success(`剧情大纲《${story.title}》已生成并保存到漫剧列表`);
   });
 }
 

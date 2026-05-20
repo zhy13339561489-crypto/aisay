@@ -50,7 +50,6 @@ export interface StoryUpdateRequest {
 }
 
 export interface StoryGenerateRequest {
-  sessionId: number;
   genre: string;
   plot?: string;
 }
