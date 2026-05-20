@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS story_volume_outlines (
     summary TEXT,
     content LONGTEXT,
     ending_hook TEXT,
+    detailed_content LONGTEXT,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_story_volume_number (story_id, volume_number),

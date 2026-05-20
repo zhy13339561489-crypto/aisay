@@ -13,6 +13,7 @@ from prompt import (
     prompt_VolumeCount,
     prompt_VolumeOutlineSingle,
     prompt_VolumeOutline_Editor,
+    prompt_VolumeStory,
 )
 
 
@@ -23,6 +24,7 @@ promptTemplate_ReviseOutline = PromptTemplate.from_template(prompt_ReviseOutline
 promptTemplate_VolumeCount = PromptTemplate.from_template(prompt_VolumeCount)
 promptTemplate_VolumeOutlineSingle = PromptTemplate.from_template(prompt_VolumeOutlineSingle)
 promptTemplate_VolumeOutlineEditor = PromptTemplate.from_template(prompt_VolumeOutline_Editor)
+promptTemplate_VolumeStory = PromptTemplate.from_template(prompt_VolumeStory)
 
 
 class StoryOutlineGenerateRequest(BaseModel):
@@ -124,12 +126,33 @@ class StoryVolumeOutlineReviseRequest(BaseModel):
     suggestion: str
 
 
+class StoryVolumeStoryGenerateRequest(BaseModel):
+    """分卷详细故事正文生成请求体。
+    调用方：rabbitmq_worker 分卷正文生成任务；同时保留 HTTP 路由用于本地调试。
+    """
+
+    user_id: int = Field(alias="userId")
+    story_id: int = Field(alias="storyId")
+    volume_id: int = Field(alias="volumeId")
+    title: str
+    story_summary: str | None = Field(default=None, alias="storySummary")
+    outline: str
+    main_characters: list[MainCharacterSetting] = Field(default_factory=list, alias="mainCharacters")
+    volume_outline: VolumeOutlineItem = Field(alias="volumeOutline")
+
+
 class StoryVolumeOutlineGenerateResponse(BaseModel):
     """分卷大纲生成响应体。
     包含大模型生成的分卷大纲列表。
     """
 
     volumes: list[VolumeOutlineItem]
+
+
+class StoryVolumeStoryGenerateResponse(BaseModel):
+    """分卷详细故事正文生成响应体。"""
+
+    volume_story: str = Field(alias="volumeStory")
 
 
 class NovelOutlineOutput(BaseModel):
@@ -210,6 +233,29 @@ def format_volume_outline_context(volumes: list[VolumeOutlineItem]) -> str:
             for volume in volumes
         ]
     )
+
+
+def extract_llm_text(raw_result: object) -> str:
+    """作用：从普通 ChatModel 响应中提取文本内容。
+    调用方：generate_volume_story。长篇正文不再使用 structured output，避免 tool/json 解析失败返回 None。
+    """
+    if raw_result is None:
+        return ""
+
+    content = getattr(raw_result, "content", raw_result)
+    if isinstance(content, str):
+        return content.strip()
+    if isinstance(content, list):
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, str):
+                parts.append(item)
+            elif isinstance(item, dict):
+                text = item.get("text") or item.get("content")
+                if text:
+                    parts.append(str(text))
+        return "\n".join(parts).strip()
+    return str(content).strip()
 
 
 @router.post("/api/story/outline", response_model=StoryOutlineGenerateResponse)
@@ -401,4 +447,54 @@ def revise_volume_outline(request: StoryVolumeOutlineReviseRequest) -> StoryVolu
     log_progress(trace_id, f"model returned {len(result.volumes)} revised volume outlines", started_at, scope)
     response = StoryVolumeOutlineGenerateResponse(volumes=result.volumes)
     log_progress(trace_id, "revision response ready", started_at, scope)
+    return response
+
+
+@router.post("/api/story/volume-story", response_model=StoryVolumeStoryGenerateResponse)
+def generate_volume_story(request: StoryVolumeStoryGenerateRequest) -> StoryVolumeStoryGenerateResponse:
+    """作用：根据指定分卷大纲生成该卷详细完整故事正文。
+    调用方：rabbitmq_worker 分卷正文生成任务；同时保留 HTTP 路由用于本地调试。
+    """
+    trace_id = uuid.uuid4().hex[:8]
+    started_at = time.perf_counter()
+    scope = "volume-story"
+    if not request.outline or not request.outline.strip():
+        raise HTTPException(status_code=400, detail="Story outline is required before generating volume story")
+    if not request.volume_outline.content or not request.volume_outline.content.strip():
+        raise HTTPException(status_code=400, detail="Volume outline content is required before generating volume story")
+
+    log_progress(
+        trace_id,
+        (
+            f"request accepted, user_id={request.user_id}, story_id={request.story_id}, "
+            f"volume_id={request.volume_id}, volume={request.volume_outline.volume_number}"
+        ),
+        started_at,
+        scope,
+    )
+
+    chain = promptTemplate_VolumeStory | structured_llm_base
+    log_progress(trace_id, "plain text volume story chain created, invoking Tongyi model", started_at, scope)
+    raw_result = chain.invoke(
+        {
+            "Title": request.title,
+            "StorySummary": request.story_summary or "",
+            "Outline": request.outline,
+            "Characters": build_characters_text(request.main_characters),
+            "VolumeNumber": request.volume_outline.volume_number,
+            "VolumeTitle": request.volume_outline.title,
+            "VolumeSummary": request.volume_outline.summary or "",
+            "VolumeContent": request.volume_outline.content,
+            "EndingHook": request.volume_outline.ending_hook or "",
+        },
+        config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+    )
+
+    volume_story = extract_llm_text(raw_result)
+    if not volume_story:
+        raise HTTPException(status_code=502, detail="Tongyi model returned empty volume story")
+
+    log_progress(trace_id, "model returned volume story text, preparing response", started_at, scope)
+    response = StoryVolumeStoryGenerateResponse(volumeStory=volume_story)
+    log_progress(trace_id, "volume story response ready", started_at, scope)
     return response

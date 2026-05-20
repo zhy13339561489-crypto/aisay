@@ -17,6 +17,10 @@ public class AiStoryTaskResultMessage {
 
     private Long storyId;
 
+    private Long volumeId;
+
+    private Integer volumeNumber;
+
     private Boolean success;
 
     private String errorMessage;
@@ -24,6 +28,8 @@ public class AiStoryTaskResultMessage {
     private StoryOutlineGenerateResponse storyOutline;
 
     private StoryVolumeOutlineGenerateResponse volumeOutline;
+
+    private String volumeStory;
 
     private Boolean partial;
 

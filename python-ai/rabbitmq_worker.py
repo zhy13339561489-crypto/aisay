@@ -12,8 +12,10 @@ from story_ai import (
     StoryOutlineReviseRequest,
     StoryVolumeOutlineGenerateRequest,
     StoryVolumeOutlineReviseRequest,
+    StoryVolumeStoryGenerateRequest,
     generate_story_outline,
     generate_volume_outline,
+    generate_volume_story,
     revise_story_outline,
     revise_volume_outline,
 )
@@ -29,6 +31,7 @@ TASK_STORY_GENERATE = "STORY_GENERATE"
 TASK_STORY_REVISE = "STORY_REVISE"
 TASK_VOLUME_GENERATE = "VOLUME_GENERATE"
 TASK_VOLUME_REVISE = "VOLUME_REVISE"
+TASK_VOLUME_STORY_GENERATE = "VOLUME_STORY_GENERATE"
 
 _worker_thread: threading.Thread | None = None
 
@@ -120,10 +123,13 @@ def _handle_story_task(
         "taskType": task.get("taskType"),
         "userId": task.get("userId"),
         "storyId": task.get("storyId"),
+        "volumeId": task.get("volumeId"),
+        "volumeNumber": None,
         "success": False,
         "errorMessage": None,
         "storyOutline": None,
         "volumeOutline": None,
+        "volumeStory": None,
         "partial": False,
         "completed": False,
     }
@@ -190,6 +196,26 @@ def _handle_story_task(
             )
             result["volumeOutline"] = response.model_dump(by_alias=True)
             result["completed"] = True
+        elif task_type == TASK_VOLUME_STORY_GENERATE:
+            volume_outline = (task.get("volumeOutlines") or [None])[0]
+            if not volume_outline:
+                raise ValueError("Volume outline is required for volume story generation")
+            response = generate_volume_story(
+                StoryVolumeStoryGenerateRequest(
+                    userId=task.get("userId"),
+                    storyId=task.get("storyId"),
+                    volumeId=task.get("volumeId"),
+                    title=task.get("title") or "",
+                    storySummary=task.get("storySummary"),
+                    outline=task.get("outline") or "",
+                    mainCharacters=task.get("mainCharacters") or [],
+                    volumeOutline=volume_outline,
+                )
+            )
+            result["volumeId"] = task.get("volumeId")
+            result["volumeNumber"] = volume_outline.get("volumeNumber")
+            result["volumeStory"] = response.volume_story
+            result["completed"] = True
         else:
             raise ValueError(f"Unsupported AI story task type: {task_type}")
 
@@ -212,10 +238,13 @@ def _base_result(task: dict[str, Any]) -> dict[str, Any]:
         "taskType": task.get("taskType"),
         "userId": task.get("userId"),
         "storyId": task.get("storyId"),
+        "volumeId": task.get("volumeId"),
+        "volumeNumber": None,
         "success": False,
         "errorMessage": None,
         "storyOutline": None,
         "volumeOutline": None,
+        "volumeStory": None,
         "partial": False,
         "completed": False,
     }

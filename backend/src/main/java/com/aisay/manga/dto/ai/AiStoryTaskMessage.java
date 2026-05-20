@@ -19,6 +19,8 @@ public class AiStoryTaskMessage {
 
     private Long storyId;
 
+    private Long volumeId;
+
     private String genre;
 
     private String plot;

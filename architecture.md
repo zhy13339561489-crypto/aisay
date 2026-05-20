@@ -1008,3 +1008,32 @@ sequenceDiagram
 ```
 
 这个设计让用户能在详情页逐步看到分卷结果，也避免 RabbitMQ 消息重投时插入重复卷。
+
+### 分卷详细故事生成
+
+每条分卷大纲现在可以进一步生成该卷的详细完整故事正文。数据层在 `story_volume_outlines` 中新增 `detailed_content` 字段，继续保持“一卷一条记录”的模型：`summary`、`content`、`ending_hook` 保存分卷大纲信息，`detailed_content` 保存根据该卷大纲扩写出来的正文。
+
+```mermaid
+sequenceDiagram
+    participant View as StoryDetailView
+    participant Java as StoryController/StoryService
+    participant RequestQ as RabbitMQ request queue
+    participant Python as rabbitmq_worker/story_ai
+    participant LLM as Tongyi
+    participant ResultQ as RabbitMQ result queue
+    participant DB as story_volume_outlines
+
+    View->>Java: POST /api/story/{id}/volume-outline/{volumeId}/story/generate
+    Java->>RequestQ: VOLUME_STORY_GENERATE
+    Java-->>View: 返回 volume_story_pending 状态
+    Python->>RequestQ: 消费指定分卷正文生成任务
+    Python->>LLM: prompt_VolumeStory + structured output
+    LLM-->>Python: volumeStory
+    Python->>ResultQ: 发送 volumeStory
+    Java->>ResultQ: 监听结果
+    Java->>DB: 更新 detailed_content
+    View->>Java: 轮询故事详情
+    Java-->>View: 返回 detailedContent
+```
+
+这个能力仍属于“非对话大模型调用”，因此不走 `AiEngineClient` 的同步 HTTP，而是沿用 RabbitMQ 异步任务链路。前端每个分卷卡片有独立的“生成详细故事”按钮，生成完成后正文显示在当前分卷下方。

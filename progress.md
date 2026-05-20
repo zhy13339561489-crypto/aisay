@@ -1258,3 +1258,50 @@
 - [ ] 重启 Python FastAPI，让新的逐卷回调和 RabbitMQ partial 消息生效。
 - [ ] 重启 Java 后端，让 `partial` / `completed` 结果处理逻辑生效。
 - [ ] 在故事详情页点击“分卷大纲生成”后观察页面，每 5 秒轮询时应逐步看到已生成的卷。
+
+## 2026-05-20 分卷详细故事生成
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260520_add_volume_detailed_content.sql`，给 `story_volume_outlines` 增加 `detailed_content` 字段。
+- [x] 同步更新 `backend/src/main/resources/db/init.sql`，新环境初始化时会包含 `detailed_content`。
+
+### 后端
+- [x] `StoryVolumeOutline`、`StoryDetailResponse.VolumeOutlineItem` 新增 `detailedContent` 字段。
+- [x] 新增 `POST /api/story/{id}/volume-outline/{volumeId}/story/generate`，用于提交指定分卷的详细故事生成任务。
+- [x] RabbitMQ 任务新增 `VOLUME_STORY_GENERATE`，Java 提交任务后立即返回，Python 完成后回传 `volumeStory`。
+- [x] Java 监听结果后把正文保存到当前分卷的 `detailed_content`，并把 story 状态恢复为 `draft`。
+- [x] 新增 story 状态 `volume_story_pending`，用于前端展示“分卷正文生成中”。
+
+### Python
+- [x] 新增 `prompt_VolumeStory`，要求根据故事总大纲、角色设定和当前分卷大纲生成小说正文，而不是提纲。
+- [x] 新增 `generate_volume_story` 和调试 HTTP 路由 `/api/story/volume-story`。
+- [x] RabbitMQ worker 支持消费 `VOLUME_STORY_GENERATE` 并发布 `volumeStory` 结果。
+
+### 前端
+- [x] 每个分卷卡片新增“生成详细故事”按钮。
+- [x] 分卷详情返回和展示新增 `detailedContent`。
+- [x] 删除分卷筛选下拉中的“全部显示”，现在只选择具体第几卷，默认显示第一卷。
+- [x] 提交分卷正文生成后会进入轮询，完成后自动显示详细故事。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] Python 请求模型实例化检查成功。
+- [x] Python 导入检查成功：`import main, rabbitmq_worker, story_ai`。
+- [x] 前端构建成功：`npm run build`。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260520_add_volume_detailed_content.sql`。
+- [ ] 重启 Java 后端，让新增接口、字段映射和 RabbitMQ 任务处理生效。
+- [ ] 重启 Python FastAPI，让 `VOLUME_STORY_GENERATE` worker 分支和新提示词生效。
+- [ ] 刷新前端后进入故事详情页，选择某一卷并点击“生成详细故事”。
+
+### 2026-05-20 分卷正文生成空结果修复
+- [x] 定位错误原因：`generate_volume_story` 使用 `with_structured_output(VolumeStoryOutput)` 生成长篇正文时，Tongyi/LangChain 可能完成模型请求但结构化解析结果为 `None`。
+- [x] 移除分卷正文生成链路中的 `with_structured_output`，改为普通文本输出，再由 Python 封装为 `volumeStory` 返回给 Java。
+- [x] 新增 `extract_llm_text`，兼容 ChatModel 返回的字符串、消息对象和列表内容。
+- [x] 如果模型真实返回空正文，改为明确抛出 `502 Tongyi model returned empty volume story`，不再出现 `NoneType` 报错。
+- [x] Python 导入与文本提取检查通过。
+- [x] 后端编译通过：`mvn -gs ..\settings.phase1.xml compile`。
+
+需要你做的事情：
+- [ ] 重启 Python FastAPI，让修复后的 `generate_volume_story` 生效。
+- [ ] 重新点击对应分卷的“生成详细故事”按钮测试。

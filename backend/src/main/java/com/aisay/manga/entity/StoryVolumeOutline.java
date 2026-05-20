@@ -30,6 +30,8 @@ public class StoryVolumeOutline {
 
     private String endingHook;
 
+    private String detailedContent;
+
     private LocalDateTime createdAt;
 
     private LocalDateTime updatedAt;

@@ -44,6 +44,8 @@ public class StoryServiceImpl implements StoryService {
 
     private static final String STORY_STATUS_VOLUME_PENDING = "volume_pending";
 
+    private static final String STORY_STATUS_VOLUME_STORY_PENDING = "volume_story_pending";
+
     private static final String STORY_STATUS_FAILED = "failed";
 
     private static final String OUTLINE_STYLE = "story_outline";
@@ -211,6 +213,35 @@ public class StoryServiceImpl implements StoryService {
     }
 
     /**
+     * 作用：把指定分卷标记为正文生成任务，异步投递给 Python worker。
+     * 调用方：StoryController#generateVolumeStory。
+     */
+    @Override
+    @Transactional
+    public StoryDetailResponse generateVolumeStory(Long storyId, Long volumeId, Long userId) {
+        Story story = getOwnedStory(storyId, userId);
+        StoryVolumeOutline volume = getOwnedVolume(storyId, volumeId);
+        if (volume.getContent() == null || volume.getContent().isBlank()) {
+            throw new IllegalArgumentException("Volume outline content is required before generating detailed story.");
+        }
+
+        story.setStatus(STORY_STATUS_VOLUME_STORY_PENDING);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+
+        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_STORY_GENERATE, userId, storyId);
+        message.setVolumeId(volumeId);
+        message.setTitle(story.getTitle());
+        message.setStorySummary(story.getSynopsis());
+        message.setOutline(story.getFullContent());
+        message.setMainCharacters(getMainCharacterSettings(storyId));
+        message.setVolumeOutlines(List.of(toAiVolumeOutlineItem(volume)));
+        publishAfterCommit(message);
+
+        return getStoryDetail(storyId, userId);
+    }
+
+    /**
      * 作用：保存用户手动编辑后的分卷大纲列表，整体替换当前 story 的旧分卷。
      * 调用方：StoryController#updateVolumeOutlines。
      */
@@ -254,6 +285,7 @@ public class StoryServiceImpl implements StoryService {
             case AiRabbitConstants.TASK_STORY_REVISE -> applyRevisedStoryOutline(story, result.getStoryOutline());
             case AiRabbitConstants.TASK_VOLUME_GENERATE -> applyGeneratedVolumeOutlineResult(story, result);
             case AiRabbitConstants.TASK_VOLUME_REVISE -> applyVolumeOutline(story, result.getVolumeOutline());
+            case AiRabbitConstants.TASK_VOLUME_STORY_GENERATE -> applyVolumeStory(story, result);
             default -> {
                 // Ignore unknown task types so one bad message does not block the listener.
             }
@@ -432,6 +464,25 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.updateById(story);
     }
 
+    private void applyVolumeStory(Story story, AiStoryTaskResultMessage result) {
+        if (result.getVolumeId() == null || result.getVolumeStory() == null || result.getVolumeStory().isBlank()) {
+            markStoryFailed(story);
+            return;
+        }
+
+        StoryVolumeOutline volume = storyVolumeOutlineMapper.selectById(result.getVolumeId());
+        if (volume == null || !story.getId().equals(volume.getStoryId())) {
+            return;
+        }
+        volume.setDetailedContent(result.getVolumeStory());
+        volume.setUpdatedAt(LocalDateTime.now());
+        storyVolumeOutlineMapper.updateById(volume);
+
+        story.setStatus(STORY_STATUS_DRAFT);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+    }
+
     private List<StoryOutlineGenerateResponse.MainCharacterSetting> getMainCharacterSettings(Long storyId) {
         return characterMapper.selectList(new LambdaQueryWrapper<Character>()
                         .eq(Character::getStoryId, storyId)
@@ -488,6 +539,7 @@ public class StoryServiceImpl implements StoryService {
             volume.setSummary(item.getSummary());
             volume.setContent(item.getContent());
             volume.setEndingHook(item.getEndingHook());
+            volume.setDetailedContent(null);
             volume.setCreatedAt(now);
             volume.setUpdatedAt(now);
             storyVolumeOutlineMapper.insert(volume);
@@ -538,6 +590,14 @@ public class StoryServiceImpl implements StoryService {
             throw new IllegalArgumentException("No permission to access this story");
         }
         return story;
+    }
+
+    private StoryVolumeOutline getOwnedVolume(Long storyId, Long volumeId) {
+        StoryVolumeOutline volume = storyVolumeOutlineMapper.selectById(volumeId);
+        if (volume == null || !storyId.equals(volume.getStoryId())) {
+            throw new NoSuchElementException("Volume outline not found");
+        }
+        return volume;
     }
 
     private StoryResponse toStoryResponse(Story story) {
@@ -612,7 +672,8 @@ public class StoryServiceImpl implements StoryService {
                 volume.getTitle(),
                 volume.getSummary(),
                 volume.getContent(),
-                volume.getEndingHook()
+                volume.getEndingHook(),
+                volume.getDetailedContent()
         );
     }
 }

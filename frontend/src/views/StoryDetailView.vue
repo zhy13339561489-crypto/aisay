@@ -75,7 +75,6 @@
               class="volume-filter"
               placeholder="选择显示范围"
             >
-              <el-option label="全部显示" :value="0" />
               <el-option
                 v-for="volume in story.volumeOutlines"
                 :key="volume.id || volume.volumeNumber"
@@ -119,10 +118,23 @@
             <div class="volume-title-row">
               <el-tag type="success" effect="light">第 {{ volume.volumeNumber }} 卷</el-tag>
               <h3>{{ volume.title }}</h3>
+              <el-button
+                type="primary"
+                plain
+                size="small"
+                :loading="storyStore.generatingVolumeStoryId === volume.id"
+                @click="generateVolumeStory(volume.id)"
+              >
+                生成详细故事
+              </el-button>
             </div>
             <p v-if="volume.summary" class="volume-summary">{{ volume.summary }}</p>
             <p v-if="volume.content" class="script-text">{{ volume.content }}</p>
             <p v-if="volume.endingHook" class="ending-hook">卷末钩子：{{ volume.endingHook }}</p>
+            <div v-if="volume.detailedContent" class="volume-story">
+              <h4>详细故事</h4>
+              <p class="script-text">{{ volume.detailedContent }}</p>
+            </div>
           </article>
         </div>
         <el-empty v-else description="暂无分卷大纲，点击按钮后会根据剧情大纲自动生成。" />
@@ -384,15 +396,15 @@ const manualForm = reactive({
 const volumeManualForm = reactive({
   volumes: [] as EditableVolumeOutline[],
 });
-const selectedVolumeNumber = ref(0);
+const selectedVolumeNumber = ref<number>();
 let storyPollingTimer: number | undefined;
 
 const story = computed(() => storyStore.currentStory);
 const hasVolumeOutlines = computed(() => (story.value?.volumeOutlines?.length || 0) > 0);
 const displayedVolumeOutlines = computed(() => {
   const volumes = story.value?.volumeOutlines || [];
-  if (selectedVolumeNumber.value === 0) {
-    return volumes;
+  if (!selectedVolumeNumber.value) {
+    return volumes.length > 0 ? [volumes[0]] : [];
   }
   return volumes.filter((volume) => volume.volumeNumber === selectedVolumeNumber.value);
 });
@@ -406,7 +418,7 @@ onBeforeUnmount(() => {
 watch(
   () => props.id,
   () => {
-    selectedVolumeNumber.value = 0;
+    selectedVolumeNumber.value = undefined;
     loadStory();
   },
 );
@@ -414,13 +426,7 @@ watch(
 watch(
   () => story.value?.volumeOutlines?.map((volume) => volume.volumeNumber).join(',') || '',
   () => {
-    if (selectedVolumeNumber.value === 0) {
-      return;
-    }
-    const stillExists = story.value?.volumeOutlines?.some((volume) => volume.volumeNumber === selectedVolumeNumber.value);
-    if (!stillExists) {
-      selectedVolumeNumber.value = 0;
-    }
+    syncSelectedVolume();
   },
 );
 
@@ -432,6 +438,7 @@ async function loadStory() {
   }
 
   const loadedStory = await storyStore.fetchStoryDetail(storyId);
+  syncSelectedVolume();
   if (isProcessingStatus(loadedStory.status)) {
     startStoryPolling(storyId);
   } else {
@@ -591,6 +598,16 @@ async function generateVolumeOutline() {
   startStoryPolling(story.value.id);
 }
 
+async function generateVolumeStory(volumeId: number) {
+  if (!story.value) {
+    return;
+  }
+
+  await storyStore.generateVolumeStory(story.value.id, volumeId);
+  ElMessage.success('分卷详细故事生成任务已提交，完成后会自动刷新');
+  startStoryPolling(story.value.id);
+}
+
 function openVolumeReviseDialog() {
   if (!hasVolumeOutlines.value) {
     ElMessage.warning('请先生成分卷大纲');
@@ -708,6 +725,9 @@ function statusLabel(status?: string) {
   if (status === 'volume_pending') {
     return '分卷处理中';
   }
+  if (status === 'volume_story_pending') {
+    return '分卷正文生成中';
+  }
   if (status === 'failed') {
     return '生成失败';
   }
@@ -724,6 +744,7 @@ function startStoryPolling(storyId: number) {
   stopStoryPolling();
   storyPollingTimer = window.setInterval(async () => {
     const latestStory = await storyStore.refreshStoryDetail(storyId);
+    syncSelectedVolume();
     if (!isProcessingStatus(latestStory.status)) {
       stopStoryPolling();
       if (latestStory.status === 'failed') {
@@ -743,7 +764,19 @@ function stopStoryPolling() {
 }
 
 function isProcessingStatus(status?: string) {
-  return status === 'generating' || status === 'revising' || status === 'volume_pending';
+  return status === 'generating' || status === 'revising' || status === 'volume_pending' || status === 'volume_story_pending';
+}
+
+function syncSelectedVolume() {
+  const volumes = story.value?.volumeOutlines || [];
+  if (volumes.length === 0) {
+    selectedVolumeNumber.value = undefined;
+    return;
+  }
+  const stillExists = volumes.some((volume) => volume.volumeNumber === selectedVolumeNumber.value);
+  if (!stillExists) {
+    selectedVolumeNumber.value = volumes[0].volumeNumber;
+  }
 }
 </script>
 

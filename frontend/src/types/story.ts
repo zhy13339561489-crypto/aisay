@@ -33,6 +33,7 @@ export interface StoryVolumeOutline {
   summary?: string;
   content?: string;
   endingHook?: string;
+  detailedContent?: string;
 }
 
 export interface StoryDetailResponse extends StoryResponse {

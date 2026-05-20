@@ -33,8 +33,7 @@ llm_temperature_0 = ChatTongyi(
 
 structured_llm_base = ChatTongyi(
     model="qwen-max",
-    temperature=0.5,
-    top_p=0.8,
+    temperature=0.8,
     streaming=False,
 )
 

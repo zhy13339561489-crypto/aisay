@@ -71,5 +71,7 @@ public class StoryDetailResponse extends StoryResponse {
         private String content;
 
         private String endingHook;
+
+        private String detailedContent;
     }
 }
