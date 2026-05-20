@@ -917,3 +917,33 @@ sequenceDiagram
 ```
 
 逐卷生成时，提示词会同时携带故事总大纲、主要角色设定、总分卷数、当前卷号和已经生成的前序分卷大纲。这样后续分卷必须承接前序卷的卷末钩子、未解决危机、伏笔、人物关系变化和代价，避免一次性生成时常见的卷与卷之间断层、重复事件或战力跳级问题。
+
+## Python AI 文件拆分
+
+Python AI 引擎现在按业务边界拆分为入口、通用运行时、故事生成和对话 Agent 四个文件。`main.py` 不再承载具体大模型调用，只创建 FastAPI app 并挂载两个业务 router；这样对话系统和其他大模型调用在文件层面分离，后续扩展对话 Agent 不会影响剧情/分卷生成链路。
+
+```mermaid
+flowchart LR
+    Main["main.py FastAPI app"]
+    Runtime["ai_runtime.py LLM runtime"]
+    StoryAI["story_ai.py story/outline/volume APIs"]
+    ChatAI["chat_ai.py chat agent API"]
+    Prompt["prompt.py prompts"]
+    Java["Java AiEngineClient"]
+
+    Main --> StoryAI
+    Main --> ChatAI
+    StoryAI --> Runtime
+    ChatAI --> Runtime
+    StoryAI --> Prompt
+    ChatAI --> Prompt
+    Java -->|/api/story/*| StoryAI
+    Java -->|/api/chat/agent| ChatAI
+```
+
+文件职责如下：
+
+- `ai_runtime.py`：读取 `api.yml` 中的通义 API Key，初始化 `llm_temperature_0`、`structured_llm_base`，并提供 `ConsoleStreamingCallback` 与 `log_progress`。
+- `story_ai.py`：负责剧情大纲生成、剧情大纲修改、分卷大纲生成、分卷大纲自动修改，所有 `/api/story/*` Python 接口都在这里。
+- `chat_ai.py`：负责对话 Agent，即 `/api/chat/agent`，用于问题重写、路由分发和 Java 方法参数生成。
+- `main.py`：只负责 FastAPI app 创建和 router 挂载，保留 `uvicorn main:app` 启动方式。

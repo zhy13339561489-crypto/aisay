@@ -1138,6 +1138,16 @@
 - [ ] 如需分卷大纲、章节生成、角色增删、世界观设定等更多能力，只需在 Java 白名单中新增方法，并在 Python Agent 提示词中加入对应 `javaMethod` 和参数结构。
 ## 2026-05-20 分卷大纲自动修改与手动修改
 
+### 2026-05-20 Python AI 文件结构拆分
+- [x] 新增 `python-ai/ai_runtime.py`，集中管理 Tongyi API Key 读取、结构化 LLM 实例、温度为 0 的 LLM 实例、控制台回调和进度日志函数。
+- [x] 新增 `python-ai/story_ai.py`，承载剧情大纲生成、剧情大纲修改、分卷大纲生成、分卷大纲自动修改等非对话大模型调用。
+- [x] 新增 `python-ai/chat_ai.py`，承载对话 Agent 的问题重写、路由分发和 Java 方法参数生成。
+- [x] 简化 `python-ai/main.py`，只负责创建 FastAPI app 并挂载 `story_ai.router` 与 `chat_ai.router`。
+- [x] 保持 HTTP 路径不变：`/api/story/outline`、`/api/story/outline/revise`、`/api/story/volume-outline`、`/api/story/volume-outline/revise`、`/api/chat/agent`。
+- [x] 验证 `import main` 成功，且 FastAPI app 路由列表包含所有旧接口。
+- [x] 使用 `python -B` 完成无字节码导入检查：`import main, ai_runtime, story_ai, chat_ai, prompt` 成功。
+- [x] `git diff --check -- python-ai` 通过；仅保留 Windows LF/CRLF 换行提示。
+
 ### 2026-05-20 分卷大纲生成改为两阶段逐卷生成
 - [x] 新增 `prompt_VolumeCount`，用于让温度为 0 的模型先判断故事应拆分为多少个分卷。
 - [x] 新增 `prompt_VolumeOutlineSingle`，用于按当前卷号逐卷生成分卷大纲。
