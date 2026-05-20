@@ -345,7 +345,10 @@ async function submitStoryOutline() {
     });
     outlineDialogVisible.value = false;
     await storyStore.fetchStories(1, 100);
-    ElMessage.success(`剧情大纲《${story.title}》已生成并保存到漫剧列表`);
+    window.setTimeout(() => {
+      storyStore.fetchStories(1, 100);
+    }, 5000);
+    ElMessage.success(`剧情大纲生成任务已提交：《${story.title}》会在后台生成并保存到漫剧列表`);
   });
 }
 

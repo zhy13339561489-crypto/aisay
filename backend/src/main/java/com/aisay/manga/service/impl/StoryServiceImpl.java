@@ -1,9 +1,9 @@
 package com.aisay.manga.service.impl;
 
-import com.aisay.manga.dto.ai.StoryOutlineGenerateRequest;
+import com.aisay.manga.config.AiRabbitConstants;
+import com.aisay.manga.dto.ai.AiStoryTaskMessage;
+import com.aisay.manga.dto.ai.AiStoryTaskResultMessage;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
-import com.aisay.manga.dto.ai.StoryOutlineReviseResponse;
-import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateRequest;
 import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateResponse;
 import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
@@ -20,20 +20,31 @@ import com.aisay.manga.repository.CharacterMapper;
 import com.aisay.manga.repository.StoryMapper;
 import com.aisay.manga.repository.StoryVolumeOutlineMapper;
 import com.aisay.manga.service.StoryService;
-import com.aisay.manga.utils.AiEngineClient;
+import com.aisay.manga.utils.AiStoryTaskPublisher;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.NoSuchElementException;
+import java.util.UUID;
 
 @Service
 public class StoryServiceImpl implements StoryService {
 
     private static final String STORY_STATUS_DRAFT = "draft";
+
+    private static final String STORY_STATUS_GENERATING = "generating";
+
+    private static final String STORY_STATUS_REVISING = "revising";
+
+    private static final String STORY_STATUS_VOLUME_PENDING = "volume_pending";
+
+    private static final String STORY_STATUS_FAILED = "failed";
 
     private static final String OUTLINE_STYLE = "story_outline";
 
@@ -43,82 +54,73 @@ public class StoryServiceImpl implements StoryService {
 
     private final StoryVolumeOutlineMapper storyVolumeOutlineMapper;
 
-    private final AiEngineClient aiEngineClient;
+    private final AiStoryTaskPublisher aiStoryTaskPublisher;
 
     /**
-     * 作用：注入故事、角色、会话、分卷大纲数据访问对象，以及 Python AI 引擎客户端。
+     * 作用：注入故事、角色、分卷大纲数据访问对象，以及 RabbitMQ AI 任务发布器。
      * 调用方：Spring 容器启动时自动构造 StoryServiceImpl。
      */
     public StoryServiceImpl(
             StoryMapper storyMapper,
             CharacterMapper characterMapper,
             StoryVolumeOutlineMapper storyVolumeOutlineMapper,
-            AiEngineClient aiEngineClient
+            AiStoryTaskPublisher aiStoryTaskPublisher
     ) {
         this.storyMapper = storyMapper;
         this.characterMapper = characterMapper;
         this.storyVolumeOutlineMapper = storyVolumeOutlineMapper;
-        this.aiEngineClient = aiEngineClient;
+        this.aiStoryTaskPublisher = aiStoryTaskPublisher;
     }
 
     /**
-     * 作用：调用 Python 生成剧情大纲，并新建漫剧记录及其角色设定。
+     * 作用：新建一个“生成中”的故事占位记录，并把剧情大纲生成任务投递给 Python worker。
      * 调用方：StoryController#generateStory。
      */
     @Override
     @Transactional
     public StoryResponse generateStory(Long userId, StoryGenerateRequest request) {
-        StoryOutlineGenerateResponse outline = aiEngineClient.generateStoryOutline(new StoryOutlineGenerateRequest(
-                userId,
-                request.getGenre(),
-                request.getPlot()
-        ));
         LocalDateTime now = LocalDateTime.now();
 
         Story story = new Story();
         story.setUserId(userId);
-        story.setTitle(resolveText(outline.getNovelName(), request.getGenre() + " story outline"));
+        story.setTitle(resolveText(request.getGenre(), "新故事") + " 剧情大纲生成中");
         story.setGenre(request.getGenre());
         story.setStyle(OUTLINE_STYLE);
-        story.setSynopsis(resolveText(outline.getStorySummary(), request.getPlot()));
-        story.setFullContent(resolveText(outline.getOutline(), "Python AI engine did not return an outline."));
-        story.setStatus(STORY_STATUS_DRAFT);
+        story.setSynopsis(resolveText(request.getPlot(), "AI 正在根据题材生成剧情大纲，请稍后刷新。"));
+        story.setFullContent(null);
+        story.setStatus(STORY_STATUS_GENERATING);
         story.setViewCount(0);
         story.setLikeCount(0);
         story.setCreatedAt(now);
         story.setUpdatedAt(now);
         storyMapper.insert(story);
-        saveMainCharacters(story.getId(), outline.getMainCharacters());
+
+        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_STORY_GENERATE, userId, story.getId());
+        message.setGenre(request.getGenre());
+        message.setPlot(request.getPlot());
+        publishAfterCommit(message);
 
         return toStoryResponse(story);
     }
 
     /**
-     * 作用：调用 Python 大纲修改接口，根据用户修改意见更新故事摘要、大纲和角色设定。
+     * 作用：把故事标记为大纲修改中，并异步投递自动修改剧情大纲任务。
      * 调用方：StoryController#reviseStoryOutline。
      */
     @Override
     @Transactional
     public StoryDetailResponse reviseStoryOutline(Long storyId, Long userId, StoryOutlineReviseRequest request) {
         Story story = getOwnedStory(storyId, userId);
-        StoryOutlineReviseResponse revised = aiEngineClient.reviseStoryOutline(new com.aisay.manga.dto.ai.StoryOutlineReviseRequest(
-                userId,
-                story.getId(),
-                story.getTitle(),
-                story.getSynopsis(),
-                story.getFullContent(),
-                request.getSuggestion()
-        ));
-
-        story.setSynopsis(resolveText(revised.getStorySummary(), story.getSynopsis()));
-        story.setFullContent(resolveText(revised.getOutline(), story.getFullContent()));
+        story.setStatus(STORY_STATUS_REVISING);
         story.setUpdatedAt(LocalDateTime.now());
         storyMapper.updateById(story);
 
-        if (revised.getMainCharacters() != null && !revised.getMainCharacters().isEmpty()) {
-            characterMapper.delete(new LambdaQueryWrapper<Character>().eq(Character::getStoryId, storyId));
-            saveMainCharacters(storyId, revised.getMainCharacters());
-        }
+        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_STORY_REVISE, userId, storyId);
+        message.setTitle(story.getTitle());
+        message.setStorySummary(story.getSynopsis());
+        message.setOutline(story.getFullContent());
+        message.setSuggestion(request.getSuggestion());
+        publishAfterCommit(message);
 
         return getStoryDetail(storyId, userId);
     }
@@ -137,6 +139,7 @@ public class StoryServiceImpl implements StoryService {
         if (request.getFullContent() != null) {
             story.setFullContent(request.getFullContent());
         }
+        story.setStatus(STORY_STATUS_DRAFT);
         story.setUpdatedAt(LocalDateTime.now());
         storyMapper.updateById(story);
 
@@ -149,7 +152,7 @@ public class StoryServiceImpl implements StoryService {
     }
 
     /**
-     * 作用：调用 Python 生成分卷大纲，清空旧分卷记录后保存新分卷记录。
+     * 作用：把故事标记为分卷处理中，并异步投递分卷大纲生成任务。
      * 调用方：StoryController#generateVolumeOutline。
      */
     @Override
@@ -159,29 +162,23 @@ public class StoryServiceImpl implements StoryService {
         if (story.getFullContent() == null || story.getFullContent().isBlank()) {
             throw new IllegalArgumentException("Please generate or fill in the story outline before generating volume outlines.");
         }
-        List<Character> characters = characterMapper.selectList(new LambdaQueryWrapper<Character>()
-                .eq(Character::getStoryId, storyId)
-                .orderByAsc(Character::getId));
-        StoryVolumeOutlineGenerateResponse response = aiEngineClient.generateVolumeOutline(new StoryVolumeOutlineGenerateRequest(
-                userId,
-                storyId,
-                story.getTitle(),
-                story.getSynopsis(),
-                story.getFullContent(),
-                characters.stream().map(this::toMainCharacterSetting).toList()
-        ));
-        if (response.getVolumes() == null || response.getVolumes().isEmpty()) {
-            throw new IllegalStateException("Python AI engine did not return any volume outlines.");
-        }
 
-        replaceVolumeOutlines(storyId, response.getVolumes());
+        story.setStatus(STORY_STATUS_VOLUME_PENDING);
         story.setUpdatedAt(LocalDateTime.now());
         storyMapper.updateById(story);
+
+        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_GENERATE, userId, storyId);
+        message.setTitle(story.getTitle());
+        message.setStorySummary(story.getSynopsis());
+        message.setOutline(story.getFullContent());
+        message.setMainCharacters(getMainCharacterSettings(storyId));
+        publishAfterCommit(message);
+
         return getStoryDetail(storyId, userId);
     }
 
     /**
-     * 作用：读取现有分卷大纲，连同用户修改意见一起转发给 Python AI 自动重写，并替换保存新分卷。
+     * 作用：读取现有分卷大纲，并异步投递自动重写分卷大纲任务。
      * 调用方：StoryController#reviseVolumeOutline。
      */
     @Override
@@ -196,26 +193,19 @@ public class StoryServiceImpl implements StoryService {
             throw new IllegalArgumentException("Story outline is required before revising volume outlines.");
         }
 
-        List<Character> characters = characterMapper.selectList(new LambdaQueryWrapper<Character>()
-                .eq(Character::getStoryId, storyId)
-                .orderByAsc(Character::getId));
-        StoryVolumeOutlineGenerateResponse response = aiEngineClient.reviseVolumeOutline(new com.aisay.manga.dto.ai.StoryVolumeOutlineReviseRequest(
-                userId,
-                storyId,
-                story.getTitle(),
-                story.getSynopsis(),
-                story.getFullContent(),
-                characters.stream().map(this::toMainCharacterSetting).toList(),
-                existingVolumes.stream().map(this::toAiVolumeOutlineItem).toList(),
-                request.getSuggestion()
-        ));
-        if (response.getVolumes() == null || response.getVolumes().isEmpty()) {
-            throw new IllegalStateException("Python AI engine did not return any revised volume outlines.");
-        }
-
-        replaceVolumeOutlines(storyId, response.getVolumes());
+        story.setStatus(STORY_STATUS_VOLUME_PENDING);
         story.setUpdatedAt(LocalDateTime.now());
         storyMapper.updateById(story);
+
+        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_REVISE, userId, storyId);
+        message.setTitle(story.getTitle());
+        message.setStorySummary(story.getSynopsis());
+        message.setOutline(story.getFullContent());
+        message.setMainCharacters(getMainCharacterSettings(storyId));
+        message.setVolumeOutlines(existingVolumes.stream().map(this::toAiVolumeOutlineItem).toList());
+        message.setSuggestion(request.getSuggestion());
+        publishAfterCommit(message);
+
         return getStoryDetail(storyId, userId);
     }
 
@@ -232,14 +222,46 @@ public class StoryServiceImpl implements StoryService {
                 .toList();
 
         replaceVolumeOutlines(storyId, volumes);
+        story.setStatus(STORY_STATUS_DRAFT);
         story.setUpdatedAt(LocalDateTime.now());
         storyMapper.updateById(story);
         return getStoryDetail(storyId, userId);
     }
 
     /**
+     * 作用：消费 Python 通过 RabbitMQ 返回的非对话 AI 任务结果，并按任务类型更新故事数据。
+     * 调用方：AiStoryTaskResultListener#handleResult。
+     */
+    @Transactional
+    public void applyStoryTaskResult(AiStoryTaskResultMessage result) {
+        if (result == null || result.getStoryId() == null || result.getTaskType() == null) {
+            return;
+        }
+
+        Story story = storyMapper.selectById(result.getStoryId());
+        if (story == null || !story.getUserId().equals(result.getUserId())) {
+            return;
+        }
+
+        if (!Boolean.TRUE.equals(result.getSuccess())) {
+            markStoryFailed(story);
+            return;
+        }
+
+        switch (result.getTaskType()) {
+            case AiRabbitConstants.TASK_STORY_GENERATE -> applyGeneratedStoryOutline(story, result.getStoryOutline());
+            case AiRabbitConstants.TASK_STORY_REVISE -> applyRevisedStoryOutline(story, result.getStoryOutline());
+            case AiRabbitConstants.TASK_VOLUME_GENERATE, AiRabbitConstants.TASK_VOLUME_REVISE ->
+                    applyVolumeOutline(story, result.getVolumeOutline());
+            default -> {
+                // Ignore unknown task types so one bad message does not block the listener.
+            }
+        }
+    }
+
+    /**
      * 作用：查询故事详情，并组合角色设定、分卷大纲和场景占位列表返回给前端。
-     * 调用方：StoryController#getStoryDetail、reviseStoryOutline、updateStoryDetail、generateVolumeOutline。
+     * 调用方：StoryController#getStoryDetail。
      */
     @Override
     public StoryDetailResponse getStoryDetail(Long storyId, Long userId) {
@@ -306,10 +328,91 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.deleteById(story.getId());
     }
 
-    /**
-     * 作用：保存 AI 返回的结构化主要角色设定。
-     * 调用方：generateStory、reviseStoryOutline。
-     */
+    private AiStoryTaskMessage newTaskMessage(String taskType, Long userId, Long storyId) {
+        AiStoryTaskMessage message = new AiStoryTaskMessage();
+        message.setTaskId(UUID.randomUUID().toString());
+        message.setTaskType(taskType);
+        message.setUserId(userId);
+        message.setStoryId(storyId);
+        return message;
+    }
+
+    private void publishAfterCommit(AiStoryTaskMessage message) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            aiStoryTaskPublisher.publish(message);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                aiStoryTaskPublisher.publish(message);
+            }
+        });
+    }
+
+    private void applyGeneratedStoryOutline(Story story, StoryOutlineGenerateResponse outline) {
+        if (outline == null) {
+            markStoryFailed(story);
+            return;
+        }
+
+        story.setTitle(resolveText(outline.getNovelName(), story.getTitle()));
+        story.setSynopsis(resolveText(outline.getStorySummary(), story.getSynopsis()));
+        story.setFullContent(resolveText(outline.getOutline(), story.getFullContent()));
+        story.setStatus(STORY_STATUS_DRAFT);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+
+        characterMapper.delete(new LambdaQueryWrapper<Character>().eq(Character::getStoryId, story.getId()));
+        saveMainCharacters(story.getId(), outline.getMainCharacters());
+    }
+
+    private void applyRevisedStoryOutline(Story story, StoryOutlineGenerateResponse outline) {
+        if (outline == null) {
+            markStoryFailed(story);
+            return;
+        }
+
+        story.setSynopsis(resolveText(outline.getStorySummary(), story.getSynopsis()));
+        story.setFullContent(resolveText(outline.getOutline(), story.getFullContent()));
+        story.setStatus(STORY_STATUS_DRAFT);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+
+        if (outline.getMainCharacters() != null && !outline.getMainCharacters().isEmpty()) {
+            characterMapper.delete(new LambdaQueryWrapper<Character>().eq(Character::getStoryId, story.getId()));
+            saveMainCharacters(story.getId(), outline.getMainCharacters());
+        }
+    }
+
+    private void applyVolumeOutline(Story story, StoryVolumeOutlineGenerateResponse response) {
+        if (response == null || response.getVolumes() == null || response.getVolumes().isEmpty()) {
+            markStoryFailed(story);
+            return;
+        }
+
+        replaceVolumeOutlines(story.getId(), response.getVolumes());
+        story.setStatus(STORY_STATUS_DRAFT);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+    }
+
+    private void markStoryFailed(Story story) {
+        story.setStatus(STORY_STATUS_FAILED);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+    }
+
+    private List<StoryOutlineGenerateResponse.MainCharacterSetting> getMainCharacterSettings(Long storyId) {
+        return characterMapper.selectList(new LambdaQueryWrapper<Character>()
+                        .eq(Character::getStoryId, storyId)
+                        .orderByAsc(Character::getId))
+                .stream()
+                .map(this::toMainCharacterSetting)
+                .toList();
+    }
+
     private void saveMainCharacters(Long storyId, List<StoryOutlineGenerateResponse.MainCharacterSetting> mainCharacters) {
         if (mainCharacters == null || mainCharacters.isEmpty()) {
             return;
@@ -327,10 +430,6 @@ public class StoryServiceImpl implements StoryService {
         });
     }
 
-    /**
-     * 作用：保存用户手动编辑后的角色设定。
-     * 调用方：updateStoryDetail。
-     */
     private void saveManualCharacters(Long storyId, List<StoryDetailUpdateRequest.CharacterUpdateItem> characters) {
         characters.stream()
                 .filter(character -> character.getName() != null && !character.getName().isBlank())
@@ -346,10 +445,6 @@ public class StoryServiceImpl implements StoryService {
                 });
     }
 
-    /**
-     * 作用：将 Python 返回的分卷大纲列表保存到 story_volume_outlines 表。
-     * 调用方：generateVolumeOutline。
-     */
     private void saveVolumeOutlines(Long storyId, List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumes) {
         if (volumes == null || volumes.isEmpty()) {
             return;
@@ -371,19 +466,11 @@ public class StoryServiceImpl implements StoryService {
         }
     }
 
-    /**
-     * 作用：整体替换某个 story 的分卷大纲列表，保证数据库中的分卷顺序与最新提交一致。
-     * 调用方：generateVolumeOutline、reviseVolumeOutline、updateVolumeOutlines。
-     */
     private void replaceVolumeOutlines(Long storyId, List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumes) {
         storyVolumeOutlineMapper.delete(new LambdaQueryWrapper<StoryVolumeOutline>().eq(StoryVolumeOutline::getStoryId, storyId));
         saveVolumeOutlines(storyId, volumes);
     }
 
-    /**
-     * 作用：按卷号和主键顺序读取某个 story 的全部分卷大纲实体。
-     * 调用方：getStoryDetail、reviseVolumeOutline。
-     */
     private List<StoryVolumeOutline> getVolumeOutlineEntities(Long storyId) {
         return storyVolumeOutlineMapper.selectList(new LambdaQueryWrapper<StoryVolumeOutline>()
                 .eq(StoryVolumeOutline::getStoryId, storyId)
@@ -391,10 +478,6 @@ public class StoryServiceImpl implements StoryService {
                 .orderByAsc(StoryVolumeOutline::getId));
     }
 
-    /**
-     * 作用：校验故事存在且属于当前用户。
-     * 调用方：reviseStoryOutline、updateStoryDetail、generateVolumeOutline、getStoryDetail、updateStory、deleteStory。
-     */
     private Story getOwnedStory(Long storyId, Long userId) {
         Story story = storyMapper.selectById(storyId);
         if (story == null) {
@@ -406,20 +489,12 @@ public class StoryServiceImpl implements StoryService {
         return story;
     }
 
-    /**
-     * 作用：将 Story 实体转换为故事列表/基础信息响应 DTO。
-     * 调用方：generateStory、getUserStories、updateStory。
-     */
     private StoryResponse toStoryResponse(Story story) {
         StoryResponse response = new StoryResponse();
         fillStoryResponse(response, story);
         return response;
     }
 
-    /**
-     * 作用：为空字符串或空值提供兜底文本。
-     * 调用方：generateStory、reviseStoryOutline、saveMainCharacters、saveManualCharacters、saveVolumeOutlines。
-     */
     private String resolveText(String value, String fallback) {
         if (value == null || value.isBlank()) {
             return fallback;
@@ -427,10 +502,6 @@ public class StoryServiceImpl implements StoryService {
         return value;
     }
 
-    /**
-     * 作用：把 Story 公共字段填充到 StoryResponse 及其子类 StoryDetailResponse。
-     * 调用方：toStoryResponse、getStoryDetail。
-     */
     private void fillStoryResponse(StoryResponse response, Story story) {
         response.setId(story.getId());
         response.setTitle(story.getTitle());
@@ -442,10 +513,6 @@ public class StoryServiceImpl implements StoryService {
         response.setCreatedAt(story.getCreatedAt());
     }
 
-    /**
-     * 作用：将角色实体转换为故事详情中的角色 DTO。
-     * 调用方：getStoryDetail。
-     */
     private StoryDetailResponse.CharacterItem toCharacterItem(Character character) {
         return new StoryDetailResponse.CharacterItem(
                 character.getId(),
@@ -457,10 +524,6 @@ public class StoryServiceImpl implements StoryService {
         );
     }
 
-    /**
-     * 作用：将数据库角色实体转换为 Python 分卷大纲接口需要的角色设定 DTO。
-     * 调用方：generateVolumeOutline。
-     */
     private StoryOutlineGenerateResponse.MainCharacterSetting toMainCharacterSetting(Character character) {
         return new StoryOutlineGenerateResponse.MainCharacterSetting(
                 character.getName(),
@@ -471,10 +534,6 @@ public class StoryServiceImpl implements StoryService {
         );
     }
 
-    /**
-     * 作用：将数据库中的分卷大纲实体转换为 Python 自动修改接口需要的分卷 DTO。
-     * 调用方：reviseVolumeOutline。
-     */
     private StoryVolumeOutlineGenerateResponse.VolumeOutlineItem toAiVolumeOutlineItem(StoryVolumeOutline volume) {
         return new StoryVolumeOutlineGenerateResponse.VolumeOutlineItem(
                 volume.getVolumeNumber(),
@@ -485,10 +544,6 @@ public class StoryServiceImpl implements StoryService {
         );
     }
 
-    /**
-     * 作用：将前端手动编辑提交的分卷条目转换为统一的分卷保存 DTO。
-     * 调用方：updateVolumeOutlines。
-     */
     private StoryVolumeOutlineGenerateResponse.VolumeOutlineItem toAiVolumeOutlineItem(StoryVolumeOutlineUpdateRequest.VolumeOutlineUpdateItem item) {
         return new StoryVolumeOutlineGenerateResponse.VolumeOutlineItem(
                 item.getVolumeNumber(),
@@ -499,10 +554,6 @@ public class StoryServiceImpl implements StoryService {
         );
     }
 
-    /**
-     * 作用：将分卷大纲实体转换为故事详情中的分卷大纲 DTO。
-     * 调用方：getStoryDetail。
-     */
     private StoryDetailResponse.VolumeOutlineItem toVolumeOutlineItem(StoryVolumeOutline volume) {
         return new StoryDetailResponse.VolumeOutlineItem(
                 volume.getId(),

@@ -26,6 +26,10 @@
       </el-select>
       <el-select v-model="selectedStatus" clearable placeholder="按状态筛选">
         <el-option label="草稿" value="draft" />
+        <el-option label="生成中" value="generating" />
+        <el-option label="修改中" value="revising" />
+        <el-option label="分卷处理中" value="volume_pending" />
+        <el-option label="生成失败" value="failed" />
         <el-option label="已发布" value="published" />
         <el-option label="已归档" value="archived" />
       </el-select>
@@ -151,6 +155,18 @@ function formatDate(value: string) {
 }
 
 function statusMeta(status?: string): { label: string; type: 'primary' | 'success' | 'info' | 'warning' | 'danger' } {
+  if (status === 'generating') {
+    return { label: '生成中', type: 'primary' };
+  }
+  if (status === 'revising') {
+    return { label: '修改中', type: 'primary' };
+  }
+  if (status === 'volume_pending') {
+    return { label: '分卷处理中', type: 'primary' };
+  }
+  if (status === 'failed') {
+    return { label: '生成失败', type: 'danger' };
+  }
   if (status === 'published') {
     return { label: '已发布', type: 'success' };
   }

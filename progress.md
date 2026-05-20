@@ -1203,3 +1203,38 @@
 - [ ] 重启 Java 后端，让新增接口和 `ai.engine.story-volume-outline-revise-path` 配置生效。
 - [ ] 前端刷新后进入某个已有分卷大纲的故事详情页，分别测试“自动修改分卷大纲”和“手动修改分卷大纲”。
 - [ ] 本次功能复用已有 `story_volume_outlines` 表，不需要新增 SQL。
+## 2026-05-20 非对话大模型调用改为 RabbitMQ 异步链路
+### 后端
+- [x] 新增 RabbitMQ 拓扑配置：`aisay.ai.exchange`、`aisay.ai.story.request`、`aisay.ai.story.result`，并绑定 `ai.story.request` / `ai.story.result` 路由键。
+- [x] 新增 `AiStoryTaskMessage` / `AiStoryTaskResultMessage`，用于 Java 与 Python 之间传递故事类 AI 任务和结果。
+- [x] 新增 `AiStoryTaskPublisher`，Java 后端提交剧情大纲、剧情大纲修改、分卷大纲生成、分卷大纲修改任务时只负责投递消息。
+- [x] 新增 `AiStoryTaskResultListener`，Java 监听 Python 完成后的结果消息，并统一落库。
+- [x] 重构 `StoryServiceImpl`：除对话系统外，不再同步 HTTP 等待 Python 大模型返回；相关接口现在会先更新 story 状态并立即返回。
+- [x] 新增状态：`generating`、`revising`、`volume_pending`、`failed`，用于前端识别后台任务进度。
+- [x] 精简 `AiEngineClient`，只保留对话 Agent 的同步 HTTP 调用，避免故事类 AI 功能继续走同步 HTTP。
+
+### Python
+- [x] 新增 `python-ai/rabbitmq_worker.py`，FastAPI 启动时会开启后台线程消费 `aisay.ai.story.request`。
+- [x] Python worker 会按任务类型复用 `story_ai.py` 中已有的剧情大纲和分卷大纲函数。
+- [x] Python 完成大模型调用后会把结构化结果发布到 `aisay.ai.story.result`，由 Java 监听后保存数据库。
+- [x] `requirements.txt` 新增 `pika>=1.3.2`，用于 RabbitMQ 连接。
+- [x] RabbitMQ 连接优先读取环境变量，默认读取仓库根目录 `config.txt` 中的 RabbitMQ 地址和账号密码。
+
+### 前端
+- [x] `storyStore` 新增 `refreshStoryDetail`，用于后台轮询刷新详情但不触发整页 loading。
+- [x] 故事详情页提交大纲修改、分卷生成、分卷自动修改后，不再提示“已生成”，而是提示任务已提交并每 5 秒轮询结果。
+- [x] 故事详情页和故事列表页新增异步任务状态展示。
+- [x] 聊天页触发“生成剧情大纲”后提示后台生成，并延迟刷新漫剧列表。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] 前端构建成功：`npm run build`。
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -B -c "import main, rabbitmq_worker; print('python import ok')"`。
+- [x] 前端构建仍有 Sass legacy JS API、Rollup 注释和大 chunk 警告，属于既有非阻断警告。
+
+### 需要你做的事情
+- [ ] 在 `python-ai` 目录执行 `pip install -r requirements.txt`，安装新增的 `pika` 依赖。
+- [ ] 重启 Python FastAPI 服务，让 RabbitMQ 后台 worker 启动。
+- [ ] 重启 Java 后端，让 RabbitMQ 队列声明、消息监听器和新的异步 StoryService 生效。
+- [ ] 重启或刷新前端页面，重新测试“生成剧情大纲”“大纲修改”“分卷大纲生成”“分卷大纲自动修改”。
+- [ ] 如果故事状态变为 `failed`，请查看 Python 控制台 `[rabbitmq-worker]` 和对应 `[story-outline]` / `[volume-outline]` 日志。

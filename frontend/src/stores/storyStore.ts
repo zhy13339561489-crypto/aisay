@@ -51,11 +51,16 @@ export const useStoryStore = defineStore('story', () => {
   async function fetchStoryDetail(id: number) {
     isLoading.value = true;
     try {
-      currentStory.value = await storyApi.getStoryDetail(id);
-      return currentStory.value;
+      return await refreshStoryDetail(id);
     } finally {
       isLoading.value = false;
     }
+  }
+
+  async function refreshStoryDetail(id: number) {
+    currentStory.value = await storyApi.getStoryDetail(id);
+    upsertStory(currentStory.value);
+    return currentStory.value;
   }
 
   async function generateStory(payload: StoryGenerateRequest) {
@@ -169,6 +174,7 @@ export const useStoryStore = defineStore('story', () => {
     hasStories,
     fetchStories,
     fetchStoryDetail,
+    refreshStoryDetail,
     generateStory,
     updateStory,
     updateStoryDetail,

@@ -331,7 +331,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
 import CharacterCard from '../components/story/CharacterCard.vue';
@@ -385,6 +385,7 @@ const volumeManualForm = reactive({
   volumes: [] as EditableVolumeOutline[],
 });
 const selectedVolumeNumber = ref(0);
+let storyPollingTimer: number | undefined;
 
 const story = computed(() => storyStore.currentStory);
 const hasVolumeOutlines = computed(() => (story.value?.volumeOutlines?.length || 0) > 0);
@@ -397,6 +398,10 @@ const displayedVolumeOutlines = computed(() => {
 });
 
 onMounted(loadStory);
+
+onBeforeUnmount(() => {
+  stopStoryPolling();
+});
 
 watch(
   () => props.id,
@@ -426,7 +431,12 @@ async function loadStory() {
     return;
   }
 
-  await storyStore.fetchStoryDetail(storyId);
+  const loadedStory = await storyStore.fetchStoryDetail(storyId);
+  if (isProcessingStatus(loadedStory.status)) {
+    startStoryPolling(storyId);
+  } else {
+    stopStoryPolling();
+  }
 }
 
 function openEditDialog() {
@@ -560,8 +570,9 @@ async function submitOutlineRevision() {
   isRevising.value = true;
   try {
     await storyStore.reviseStoryOutline(story.value.id, { suggestion });
-    ElMessage.success('大纲修改请求已提交');
+    ElMessage.success('大纲修改任务已提交，生成完成后会自动刷新');
     reviseDialogVisible.value = false;
+    startStoryPolling(story.value.id);
   } finally {
     isRevising.value = false;
   }
@@ -576,7 +587,8 @@ async function generateVolumeOutline() {
     return;
   }
   await storyStore.generateVolumeOutline(story.value.id);
-  ElMessage.success('分卷大纲已生成并保存');
+  ElMessage.success('分卷大纲生成任务已提交，完成后会自动刷新');
+  startStoryPolling(story.value.id);
 }
 
 function openVolumeReviseDialog() {
@@ -600,8 +612,9 @@ async function submitVolumeRevision() {
   }
 
   await storyStore.reviseVolumeOutline(story.value.id, { suggestion });
-  ElMessage.success('分卷大纲已自动修改并保存');
+  ElMessage.success('分卷大纲自动修改任务已提交，完成后会自动刷新');
   volumeReviseDialogVisible.value = false;
+  startStoryPolling(story.value.id);
 }
 
 function openVolumeManualEditDialog() {
@@ -686,6 +699,18 @@ async function confirmDelete() {
 }
 
 function statusLabel(status?: string) {
+  if (status === 'generating') {
+    return '生成中';
+  }
+  if (status === 'revising') {
+    return '修改中';
+  }
+  if (status === 'volume_pending') {
+    return '分卷处理中';
+  }
+  if (status === 'failed') {
+    return '生成失败';
+  }
   if (status === 'published') {
     return '已发布';
   }
@@ -693,6 +718,32 @@ function statusLabel(status?: string) {
     return '已归档';
   }
   return '草稿';
+}
+
+function startStoryPolling(storyId: number) {
+  stopStoryPolling();
+  storyPollingTimer = window.setInterval(async () => {
+    const latestStory = await storyStore.refreshStoryDetail(storyId);
+    if (!isProcessingStatus(latestStory.status)) {
+      stopStoryPolling();
+      if (latestStory.status === 'failed') {
+        ElMessage.error('AI 任务执行失败，请稍后重试或查看 Python 控制台日志');
+      } else {
+        ElMessage.success('AI 任务已完成，页面已刷新');
+      }
+    }
+  }, 5000);
+}
+
+function stopStoryPolling() {
+  if (storyPollingTimer) {
+    window.clearInterval(storyPollingTimer);
+    storyPollingTimer = undefined;
+  }
+}
+
+function isProcessingStatus(status?: string) {
+  return status === 'generating' || status === 'revising' || status === 'volume_pending';
 }
 </script>
 

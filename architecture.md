@@ -947,3 +947,39 @@ flowchart LR
 - `story_ai.py`：负责剧情大纲生成、剧情大纲修改、分卷大纲生成、分卷大纲自动修改，所有 `/api/story/*` Python 接口都在这里。
 - `chat_ai.py`：负责对话 Agent，即 `/api/chat/agent`，用于问题重写、路由分发和 Java 方法参数生成。
 - `main.py`：只负责 FastAPI app 创建和 router 挂载，保留 `uvicorn main:app` 启动方式。
+## 非对话 AI 异步消息队列架构
+
+除对话系统外，剧情大纲、剧情大纲修改、分卷大纲生成、分卷大纲自动修改都改为 RabbitMQ 异步链路。Java 不再通过 HTTP 同步等待 Python 大模型结果，而是先把任务写入 `aisay.ai.story.request`，接口立即返回当前 story 状态；Python 后台 worker 消费任务并调用 LangChain，完成后把结构化 JSON 写入 `aisay.ai.story.result`；Java 监听结果队列后统一更新 `stories`、`characters` 和 `story_volume_outlines`。
+
+```mermaid
+sequenceDiagram
+    participant Frontend as 前端
+    participant Java as Java StoryService
+    participant RequestQ as RabbitMQ request queue
+    participant Python as Python rabbitmq_worker
+    participant LLM as LangChain/Tongyi
+    participant ResultQ as RabbitMQ result queue
+    participant DB as MySQL
+
+    Frontend->>Java: 提交生成/修改请求
+    Java->>DB: 创建或标记 story 为处理中
+    Java->>RequestQ: 发布 AiStoryTaskMessage
+    Java-->>Frontend: 立即返回当前 story
+    Frontend->>Java: 轮询 story 详情
+    Python->>RequestQ: 消费任务
+    Python->>LLM: 调用非对话大模型能力
+    LLM-->>Python: structured JSON
+    Python->>ResultQ: 发布 AiStoryTaskResultMessage
+    Java->>ResultQ: 监听结果
+    Java->>DB: 保存故事/角色/分卷结果并恢复 draft 或标记 failed
+    Java-->>Frontend: 轮询拿到最新结果
+```
+
+模块职责：
+- `RabbitMqConfig` 声明 `aisay.ai.exchange`、请求队列、结果队列和 JSON 消息转换器。
+- `AiStoryTaskPublisher` 只负责发布非对话 AI 任务。
+- `AiStoryTaskResultListener` 监听 Python 完成消息，并调用 `StoryServiceImpl.applyStoryTaskResult` 落库。
+- `StoryServiceImpl` 负责业务状态流转：`generating`、`revising`、`volume_pending`、`failed`、`draft`。
+- `rabbitmq_worker.py` 负责连接 RabbitMQ、消费故事类 AI 任务、复用 `story_ai.py` 的生成函数并发布结果。
+- `AiEngineClient` 现在只保留对话 Agent 的同步 HTTP 调用，聊天系统仍按原链路工作。
+- 前端详情页通过 `refreshStoryDetail` 每 5 秒轮询后台结果，任务完成后自动显示最新大纲或分卷。

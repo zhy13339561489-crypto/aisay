@@ -26,7 +26,7 @@ promptTemplate_VolumeOutlineEditor = PromptTemplate.from_template(prompt_VolumeO
 
 class StoryOutlineGenerateRequest(BaseModel):
     """剧情大纲生成请求体。
-    对应 Java 端 AiEngineClient.generateStoryOutline 的入参，包含用户 ID、题材和可选剧情。
+    对应 Java 端 RabbitMQ 故事生成任务的入参，包含用户 ID、题材和可选剧情。
     """
 
     user_id: int = Field(alias="userId")
@@ -62,7 +62,7 @@ class StoryOutlineGenerateResponse(BaseModel):
 
 class StoryOutlineReviseRequest(BaseModel):
     """剧情大纲修改请求体。
-    对应 Java 端 AiEngineClient.reviseStoryOutline 的入参。
+    对应 Java 端 RabbitMQ 故事大纲修改任务的入参。
     """
 
     user_id: int = Field(alias="userId")
@@ -85,7 +85,7 @@ class StoryOutlineReviseResponse(BaseModel):
 
 class StoryVolumeOutlineGenerateRequest(BaseModel):
     """分卷大纲生成请求体。
-    对应 Java 端 AiEngineClient.generateVolumeOutline 的入参。
+    对应 Java 端 RabbitMQ 分卷大纲生成任务的入参。
     """
 
     user_id: int = Field(alias="userId")
@@ -110,7 +110,7 @@ class VolumeOutlineItem(BaseModel):
 
 class StoryVolumeOutlineReviseRequest(BaseModel):
     """分卷大纲自动修改请求体。
-    对应 Java 端 AiEngineClient.reviseVolumeOutline 的入参。
+    对应 Java 端 RabbitMQ 分卷大纲修改任务的入参。
     """
 
     user_id: int = Field(alias="userId")
@@ -214,7 +214,7 @@ def format_volume_outline_context(volumes: list[VolumeOutlineItem]) -> str:
 @router.post("/api/story/outline", response_model=StoryOutlineGenerateResponse)
 def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutlineGenerateResponse:
     """作用：根据题材和可选剧情生成结构化剧情大纲、故事摘要和主要角色设定。
-    调用方：Java AiEngineClient.generateStoryOutline，即 StoryServiceImpl#generateStory 的 Python 后端接口。
+    调用方：rabbitmq_worker 故事生成任务；同时保留 HTTP 路由用于本地调试。
     """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
@@ -246,7 +246,7 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
 @router.post("/api/story/outline/revise", response_model=StoryOutlineReviseResponse)
 def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineReviseResponse:
     """作用：根据用户修改意见调用 LangChain 修改剧情大纲，并返回结构化结果。
-    调用方：Java AiEngineClient.reviseStoryOutline，即 StoryServiceImpl#reviseStoryOutline 的 Python 后端接口。
+    调用方：rabbitmq_worker 大纲修改任务；同时保留 HTTP 路由用于本地调试。
     """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
@@ -287,7 +287,7 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
 @router.post("/api/story/volume-outline", response_model=StoryVolumeOutlineGenerateResponse)
 def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> StoryVolumeOutlineGenerateResponse:
     """作用：先规划总分卷数，再逐卷生成连续一致的详细分卷大纲。
-    调用方：Java AiEngineClient.generateVolumeOutline，即 StoryServiceImpl#generateVolumeOutline 的 Python 后端接口。
+    调用方：rabbitmq_worker 分卷生成任务；同时保留 HTTP 路由用于本地调试。
     """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
@@ -352,7 +352,7 @@ def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> Story
 @router.post("/api/story/volume-outline/revise", response_model=StoryVolumeOutlineGenerateResponse)
 def revise_volume_outline(request: StoryVolumeOutlineReviseRequest) -> StoryVolumeOutlineGenerateResponse:
     """作用：根据用户修改意见、原分卷大纲和故事上下文自动重写分卷大纲。
-    调用方：Java AiEngineClient.reviseVolumeOutline，即 StoryServiceImpl#reviseVolumeOutline 的 Python 后端接口。
+    调用方：rabbitmq_worker 分卷修改任务；同时保留 HTTP 路由用于本地调试。
     """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
