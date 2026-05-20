@@ -12,7 +12,7 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
-from prompt import prompt_Outline, prompt_VolumeOutline
+from prompt import prompt_ChatAgent, prompt_Outline, prompt_ReviseOutline, prompt_VolumeOutline
 
 
 def load_tongyi_api_key() -> str:
@@ -35,34 +35,10 @@ if tongyi_api_key:
 
 promptTemplate_Outline = PromptTemplate.from_template(prompt_Outline)
 
+promptTemplate_ReviseOutline = PromptTemplate.from_template(prompt_ReviseOutline)
+
 promptTemplate_VolumeOutline = PromptTemplate.from_template(prompt_VolumeOutline)
-prompt_ChatAgent = """
-你是路由与工具调用代理（Routing & Tool-Calling Agent）。  
-你运行在对话会话中，该会话已绑定到一个具体的故事项目。你的职责是：理解用户的聊天意图，将其转化为明确的指令，并决定调用哪条链路。
 
----
-
-核心任务（必须完成以下两项）
-
-1. 意图理解与指令重写 
-   将用户的自然语言消息重写为一条清晰、完整、无歧义的独立指令。若用户意图模糊，按最合理的创作方向补全。
-
-2. 路由决策  
-   根据指令判断应调用哪条链路。只允许使用下方列出的方法。
-
----
-
-输出格式要求
-
-你必须返回一个标准 JSON 对象，包含以下字段：
-
-```json
-{
-  "assistantMessage": "简短的中文回复，向用户说明执行了什么操作或给出友好回应",
-  "javaMethod": "Java 方法名，必须是下方列表中的某一个",
-  "javaMethodArgs": { ... }
-}
-"""
 promptTemplate_ChatAgent = PromptTemplate.from_template(prompt_ChatAgent)
 
 llm = ChatTongyi(
@@ -76,6 +52,12 @@ app = FastAPI(title="Aisay Python AI Engine")
 
 
 class ConsoleStreamingCallback(BaseCallbackHandler):
+    """LangChain 控制台流式回调处理器。
+
+    在大模型流式生成过程中，将 token 逐个打印到 Python 控制台，便于开发调试时实时观察生成进度。
+    同时记录每次调用的 trace_id 和耗时，用于日志追踪。
+    """
+
     def __init__(self, trace_id: str, scope: str = "story-outline"):
         """作用：初始化一次大模型调用的控制台流式日志上下文。
 
@@ -148,6 +130,11 @@ def log_progress(trace_id: str, message: str, started_at: float, scope: str = "s
 
 
 class StoryOutlineGenerateRequest(BaseModel):
+    """剧情大纲生成请求体。
+
+    对应 Java 端 AiEngineClient.generateStoryOutline 的入参，包含用户 ID、会话 ID、题材和可选剧情。
+    """
+
     user_id: int = Field(alias="userId")
     session_id: int = Field(alias="sessionId")
     session_title: str | None = Field(default=None, alias="sessionTitle")
@@ -156,6 +143,12 @@ class StoryOutlineGenerateRequest(BaseModel):
 
 
 class MainCharacterSetting(BaseModel):
+    """主要角色设定。
+
+    描述一个核心角色的基本信息，包括姓名、角色定位、背景描述、性格特征和可选的外貌特征。
+    用于剧情大纲和分卷大纲中的角色设定输出。
+    """
+
     name: str = Field(description="Character name or codename")
     role: str = Field(description="Character role, such as protagonist, partner, antagonist, mentor, or hidden manipulator")
     description: str = Field(description="Character background, ability, and narrative function")
@@ -167,6 +160,11 @@ class MainCharacterSetting(BaseModel):
 
 
 class StoryOutlineGenerateResponse(BaseModel):
+    """剧情大纲生成响应体。
+
+    返回大模型生成的小说名称、故事摘要、完整大纲和主要角色设定列表。
+    """
+
     novel_name: str = Field(alias="novelName")
     story_summary: str = Field(alias="storySummary")
     outline: str
@@ -174,6 +172,11 @@ class StoryOutlineGenerateResponse(BaseModel):
 
 
 class StoryOutlineReviseRequest(BaseModel):
+    """剧情大纲修改请求体。
+
+    对应 Java 端 AiEngineClient.reviseStoryOutline 的入参，包含用户 ID、故事 ID、当前大纲内容和用户的修改建议。
+    """
+
     user_id: int = Field(alias="userId")
     story_id: int = Field(alias="storyId")
     title: str
@@ -183,12 +186,22 @@ class StoryOutlineReviseRequest(BaseModel):
 
 
 class StoryOutlineReviseResponse(BaseModel):
+    """剧情大纲修改响应体。
+
+    返回修改后的故事摘要、大纲内容和更新后的角色设定列表。
+    """
+
     story_summary: str = Field(alias="storySummary")
     outline: str
     main_characters: list[MainCharacterSetting] = Field(default_factory=list, alias="mainCharacters")
 
 
 class StoryVolumeOutlineGenerateRequest(BaseModel):
+    """分卷大纲生成请求体。
+
+    对应 Java 端 AiEngineClient.generateVolumeOutline 的入参，包含用户 ID、故事 ID、书名、故事摘要、主线大纲和角色设定。
+    """
+
     user_id: int = Field(alias="userId")
     story_id: int = Field(alias="storyId")
     title: str
@@ -198,6 +211,11 @@ class StoryVolumeOutlineGenerateRequest(BaseModel):
 
 
 class VolumeOutlineItem(BaseModel):
+    """单卷大纲条目。
+
+    描述一卷的核心信息：卷号、标题、摘要、详细大纲内容和卷末悬念钩子。
+    """
+
     volume_number: int = Field(alias="volumeNumber", description="Volume number, starting from 1")
     title: str = Field(description="Volume title")
     summary: str = Field(description="Short summary of this volume")
@@ -206,10 +224,20 @@ class VolumeOutlineItem(BaseModel):
 
 
 class StoryVolumeOutlineGenerateResponse(BaseModel):
+    """分卷大纲生成响应体。
+
+    包含大模型生成的分卷大纲列表，每卷包含卷号、标题、摘要、详细内容和卷末钩子。
+    """
+
     volumes: list[VolumeOutlineItem]
 
 
 class ChatAgentRequest(BaseModel):
+    """对话 Agent 请求体。
+
+    对应 Java 端 AiEngineClient.runChatAgent 的入参，包含用户 ID、会话 ID、故事 ID、书名、摘要、大纲和用户消息。
+    """
+
     user_id: int = Field(alias="userId")
     session_id: int = Field(alias="sessionId")
     story_id: int = Field(alias="storyId")
@@ -220,6 +248,11 @@ class ChatAgentRequest(BaseModel):
 
 
 class ChatAgentOutput(BaseModel):
+    """对话 Agent 结构化输出。
+
+    大模型返回的结构化结果，包含重写后的用户问题、路由标签、目标 Java 方法名、方法参数和助手回复。
+    """
+
     rewritten_question: str = Field(alias="rewrittenQuestion", description="Standalone rewritten user question")
     route: str = Field(description="Routing label, such as update_outline or no_action")
     java_method: str = Field(alias="javaMethod", description="One supported Java method name")
@@ -228,17 +261,49 @@ class ChatAgentOutput(BaseModel):
 
 
 class ChatAgentResponse(ChatAgentOutput):
+    """对话 Agent HTTP 响应体。
+
+    继承 ChatAgentOutput，作为 FastAPI 接口的返回模型，字段与输出一致。
+    """
+
     pass
 
 
 class NovelOutlineOutput(BaseModel):
+    """剧情大纲结构化输出模型。
+
+    定义大模型返回的剧情大纲结构，包括小说名称、故事摘要、完整大纲和主要角色设定。
+    通过 LangChain 的 with_structured_output 绑定，确保模型输出可直接反序列化为 Python 对象。
+    """
+
     novel_name: str = Field(description="Novel title, concise and recognizable")
     story_summary: str = Field(description="Story summary, 200-300 Chinese characters")
     outline: str = Field(description="Full story outline with setting, main plot, stages, and key characters")
     main_characters: list[MainCharacterSetting] = Field(description="Main character settings, usually 3-5 key characters")
 
 
+class OutlineRevisionOutput(BaseModel):
+    """剧情大纲修改结构化输出模型。
+
+    定义大模型修改大纲后必须返回的结构，包括新的故事摘要、完整修改后大纲和主要角色设定。
+    通过 LangChain 的 with_structured_output 绑定，确保 Java 端能稳定反序列化并保存到数据库。
+    """
+
+    story_summary: str = Field(description="Updated story summary after applying the user's revision notes")
+    outline: str = Field(description="Complete revised story outline, including unchanged sections and revised sections")
+    main_characters: list[MainCharacterSetting] = Field(
+        default_factory=list,
+        description="Updated main character settings inferred from the revised outline",
+    )
+
+
 class VolumeOutlineOutput(BaseModel):
+    """分卷大纲结构化输出模型。
+
+    定义大模型返回的分卷大纲结构，包含 5-8 卷的详细大纲列表。
+    通过 LangChain 的 with_structured_output 绑定使用。
+    """
+
     volumes: list[VolumeOutlineItem] = Field(description="5-8 detailed volume outlines")
 
 
@@ -281,29 +346,43 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
 
 @app.post("/api/story/outline/revise", response_model=StoryOutlineReviseResponse)
 def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineReviseResponse:
-    """作用：接收大纲修改请求并返回临时脚手架结果。
+    """作用：根据用户修改意见调用 LangChain 修改剧情大纲，并返回结构化结果。
 
     调用方：Java AiEngineClient.reviseStoryOutline，即 StoryServiceImpl#reviseStoryOutline 的 Python 后端接口。
-    TODO：后续替换为真正的 LangChain 大纲修改链。
     """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
-    log_progress(trace_id, f"revision request accepted, user_id={request.user_id}, story_id={request.story_id}", started_at)
-    log_progress(trace_id, "revision LangChain implementation is pending; returning scaffold response", started_at)
+    scope = "story-outline-revise"
+    log_progress(
+        trace_id,
+        f"revision request accepted, user_id={request.user_id}, story_id={request.story_id}, title={request.title}",
+        started_at,
+        scope,
+    )
 
-    revised_outline = (
-        f"{request.outline}\n\n"
-        "[Pending outline revision instruction]\n"
-        f"{request.suggestion}\n\n"
-        "The frontend -> Java -> Python revision call chain is connected. "
-        "Real LangChain revision logic will be implemented later."
+    original_outline = (
+        f"书名：{request.title}\n"
+        f"故事摘要：{request.synopsis or ''}\n\n"
+        f"剧情大纲：\n{request.outline}"
     )
+    structured_llm = llm.with_structured_output(OutlineRevisionOutput)
+    chain = promptTemplate_ReviseOutline | structured_llm
+    log_progress(trace_id, "structured revision chain created, invoking Tongyi model", started_at, scope)
+    result = chain.invoke(
+        {
+            "OriginalOutline": original_outline,
+            "RevisionNotes": request.suggestion,
+        },
+        config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+    )
+
+    log_progress(trace_id, "model returned revised outline, preparing HTTP response", started_at, scope)
     response = StoryOutlineReviseResponse(
-        storySummary=request.synopsis or "Outline revision request received. Waiting for LangChain revision implementation.",
-        outline=revised_outline,
-        mainCharacters=[],
+        storySummary=result.story_summary,
+        outline=result.outline,
+        mainCharacters=result.main_characters,
     )
-    log_progress(trace_id, "revision scaffold response ready", started_at)
+    log_progress(trace_id, "revision response ready", started_at, scope)
     return response
 
 
@@ -346,6 +425,7 @@ def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> Story
     log_progress(trace_id, "model returned volume outline, preparing HTTP response", started_at, scope)
     response = StoryVolumeOutlineGenerateResponse(volumes=result.volumes)
     log_progress(trace_id, "response ready", started_at, scope)
+    print("修改成功")
     return response
 
 
