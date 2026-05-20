@@ -24,4 +24,8 @@ public class AiStoryTaskResultMessage {
     private StoryOutlineGenerateResponse storyOutline;
 
     private StoryVolumeOutlineGenerateResponse volumeOutline;
+
+    private Boolean partial;
+
+    private Boolean completed;
 }

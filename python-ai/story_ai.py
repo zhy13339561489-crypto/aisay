@@ -1,5 +1,6 @@
 import time
 import uuid
+from collections.abc import Callable
 
 from fastapi import APIRouter, HTTPException
 from langchain_core.prompts import PromptTemplate
@@ -285,7 +286,10 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
 
 
 @router.post("/api/story/volume-outline", response_model=StoryVolumeOutlineGenerateResponse)
-def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> StoryVolumeOutlineGenerateResponse:
+def generate_volume_outline(
+    request: StoryVolumeOutlineGenerateRequest,
+    on_volume_generated: Callable[[VolumeOutlineItem], None] | None = None,
+) -> StoryVolumeOutlineGenerateResponse:
     """作用：先规划总分卷数，再逐卷生成连续一致的详细分卷大纲。
     调用方：rabbitmq_worker 分卷生成任务；同时保留 HTTP 路由用于本地调试。
     """
@@ -339,6 +343,8 @@ def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> Story
         volume.volume_number = volume_number
         generated_volumes.append(volume)
         log_progress(trace_id, f"volume {volume_number}/{total_volumes} generated: {volume.title}", started_at, scope)
+        if on_volume_generated:
+            on_volume_generated(volume)
 
     if not generated_volumes:
         raise HTTPException(status_code=502, detail="Tongyi model returned no volume outlines")

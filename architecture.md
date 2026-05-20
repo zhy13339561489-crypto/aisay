@@ -983,3 +983,28 @@ sequenceDiagram
 - `rabbitmq_worker.py` 负责连接 RabbitMQ、消费故事类 AI 任务、复用 `story_ai.py` 的生成函数并发布结果。
 - `AiEngineClient` 现在只保留对话 Agent 的同步 HTTP 调用，聊天系统仍按原链路工作。
 - 前端详情页通过 `refreshStoryDetail` 每 5 秒轮询后台结果，任务完成后自动显示最新大纲或分卷。
+
+### 分卷逐卷回传
+
+分卷生成链路不再等所有卷生成完才回传。`story_ai.generate_volume_outline` 在循环生成每一卷后触发 `on_volume_generated` 回调，`rabbitmq_worker` 会把这一卷包装成 `partial=true` 的 `AiStoryTaskResultMessage` 发送给 Java。Java 收到 partial 消息后按 `storyId + volumeNumber` 覆盖写入单卷数据，story 状态继续保持 `volume_pending`；Python 全部生成结束后再发送 `completed=true` 的完成消息，Java 才把 story 状态恢复为 `draft`。
+
+```mermaid
+sequenceDiagram
+    participant Python as Python generate_volume_outline
+    participant ResultQ as RabbitMQ result queue
+    participant Java as Java ResultListener
+    participant DB as story_volume_outlines
+    participant Frontend as StoryDetailView polling
+
+    loop 每生成一卷
+        Python->>ResultQ: partial=true, volumes=[当前卷]
+        Java->>ResultQ: 消费当前卷消息
+        Java->>DB: 按 storyId + volumeNumber 覆盖写入
+        Frontend->>Java: 轮询 story 详情
+        Java-->>Frontend: 返回已生成的分卷列表
+    end
+    Python->>ResultQ: completed=true
+    Java->>DB: story.status = draft
+```
+
+这个设计让用户能在详情页逐步看到分卷结果，也避免 RabbitMQ 消息重投时插入重复卷。

@@ -1238,3 +1238,23 @@
 - [ ] 重启 Java 后端，让 RabbitMQ 队列声明、消息监听器和新的异步 StoryService 生效。
 - [ ] 重启或刷新前端页面，重新测试“生成剧情大纲”“大纲修改”“分卷大纲生成”“分卷大纲自动修改”。
 - [ ] 如果故事状态变为 `failed`，请查看 Python 控制台 `[rabbitmq-worker]` 和对应 `[story-outline]` / `[volume-outline]` 日志。
+
+## 2026-05-20 分卷大纲逐卷回传
+### 调整内容
+- [x] `generate_volume_outline` 新增 `on_volume_generated` 回调参数，每生成完一卷就可以把当前卷交给调用方处理。
+- [x] `rabbitmq_worker.py` 在分卷生成过程中，每完成一卷立即发送 `partial=true`、`completed=false` 的结果消息到 `aisay.ai.story.result`。
+- [x] 分卷生成全部结束后，Python 再发送一条 `partial=false`、`completed=true` 的完成消息，避免 Java 必须等全量 `volumes` 才更新状态。
+- [x] Java `AiStoryTaskResultMessage` 新增 `partial` 和 `completed` 字段。
+- [x] Java 监听到分卷 partial 消息后，只按 `storyId + volumeNumber` 覆盖写入当前卷，保持 story 状态为 `volume_pending`。
+- [x] Java 监听到 completed 消息后，将 story 状态恢复为 `draft`。
+- [x] 重新生成分卷时，Java 会先清空当前 story 的旧分卷，避免旧分卷和新生成的逐卷结果混在一起。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -B -c "import main, rabbitmq_worker, story_ai; print('python import ok')"`。
+- [x] 前端构建成功：`npm run build`。
+
+### 需要你做的事情
+- [ ] 重启 Python FastAPI，让新的逐卷回调和 RabbitMQ partial 消息生效。
+- [ ] 重启 Java 后端，让 `partial` / `completed` 结果处理逻辑生效。
+- [ ] 在故事详情页点击“分卷大纲生成”后观察页面，每 5 秒轮询时应逐步看到已生成的卷。

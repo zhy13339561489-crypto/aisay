@@ -166,6 +166,7 @@ public class StoryServiceImpl implements StoryService {
         story.setStatus(STORY_STATUS_VOLUME_PENDING);
         story.setUpdatedAt(LocalDateTime.now());
         storyMapper.updateById(story);
+        storyVolumeOutlineMapper.delete(new LambdaQueryWrapper<StoryVolumeOutline>().eq(StoryVolumeOutline::getStoryId, storyId));
 
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_GENERATE, userId, storyId);
         message.setTitle(story.getTitle());
@@ -251,8 +252,8 @@ public class StoryServiceImpl implements StoryService {
         switch (result.getTaskType()) {
             case AiRabbitConstants.TASK_STORY_GENERATE -> applyGeneratedStoryOutline(story, result.getStoryOutline());
             case AiRabbitConstants.TASK_STORY_REVISE -> applyRevisedStoryOutline(story, result.getStoryOutline());
-            case AiRabbitConstants.TASK_VOLUME_GENERATE, AiRabbitConstants.TASK_VOLUME_REVISE ->
-                    applyVolumeOutline(story, result.getVolumeOutline());
+            case AiRabbitConstants.TASK_VOLUME_GENERATE -> applyGeneratedVolumeOutlineResult(story, result);
+            case AiRabbitConstants.TASK_VOLUME_REVISE -> applyVolumeOutline(story, result.getVolumeOutline());
             default -> {
                 // Ignore unknown task types so one bad message does not block the listener.
             }
@@ -398,6 +399,33 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.updateById(story);
     }
 
+    private void applyGeneratedVolumeOutlineResult(Story story, AiStoryTaskResultMessage result) {
+        if (Boolean.TRUE.equals(result.getPartial())) {
+            applyPartialVolumeOutline(story, result.getVolumeOutline());
+            return;
+        }
+
+        if (Boolean.TRUE.equals(result.getCompleted())) {
+            story.setStatus(STORY_STATUS_DRAFT);
+            story.setUpdatedAt(LocalDateTime.now());
+            storyMapper.updateById(story);
+            return;
+        }
+
+        applyVolumeOutline(story, result.getVolumeOutline());
+    }
+
+    private void applyPartialVolumeOutline(Story story, StoryVolumeOutlineGenerateResponse response) {
+        if (response == null || response.getVolumes() == null || response.getVolumes().isEmpty()) {
+            return;
+        }
+
+        response.getVolumes().forEach(volume -> replaceSingleVolumeOutline(story.getId(), volume));
+        story.setStatus(STORY_STATUS_VOLUME_PENDING);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+    }
+
     private void markStoryFailed(Story story) {
         story.setStatus(STORY_STATUS_FAILED);
         story.setUpdatedAt(LocalDateTime.now());
@@ -469,6 +497,29 @@ public class StoryServiceImpl implements StoryService {
     private void replaceVolumeOutlines(Long storyId, List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumes) {
         storyVolumeOutlineMapper.delete(new LambdaQueryWrapper<StoryVolumeOutline>().eq(StoryVolumeOutline::getStoryId, storyId));
         saveVolumeOutlines(storyId, volumes);
+    }
+
+    private void replaceSingleVolumeOutline(Long storyId, StoryVolumeOutlineGenerateResponse.VolumeOutlineItem item) {
+        if (item == null) {
+            return;
+        }
+
+        Integer volumeNumber = item.getVolumeNumber();
+        if (volumeNumber == null) {
+            List<StoryVolumeOutline> existingVolumes = getVolumeOutlineEntities(storyId);
+            volumeNumber = existingVolumes.size() + 1;
+        }
+
+        storyVolumeOutlineMapper.delete(new LambdaQueryWrapper<StoryVolumeOutline>()
+                .eq(StoryVolumeOutline::getStoryId, storyId)
+                .eq(StoryVolumeOutline::getVolumeNumber, volumeNumber));
+        saveVolumeOutlines(storyId, List.of(new StoryVolumeOutlineGenerateResponse.VolumeOutlineItem(
+                volumeNumber,
+                item.getTitle(),
+                item.getSummary(),
+                item.getContent(),
+                item.getEndingHook()
+        )));
     }
 
     private List<StoryVolumeOutline> getVolumeOutlineEntities(Long storyId) {

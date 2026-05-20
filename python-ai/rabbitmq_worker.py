@@ -85,22 +85,33 @@ def _consume_forever() -> None:
     def on_message(ch: Any, method: Any, properties: Any, body: bytes) -> None:
         task = json.loads(body.decode("utf-8"))
         print(f"[rabbitmq-worker] received task {task.get('taskId')} type={task.get('taskType')}")
-        result = _handle_story_task(task)
-        ch.basic_publish(
-            exchange=EXCHANGE,
-            routing_key=RESULT_ROUTING_KEY,
-            body=json.dumps(result, ensure_ascii=False).encode("utf-8"),
-            properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
-        )
+
+        def publish_result(result: dict[str, Any]) -> None:
+            ch.basic_publish(
+                exchange=EXCHANGE,
+                routing_key=RESULT_ROUTING_KEY,
+                body=json.dumps(result, ensure_ascii=False).encode("utf-8"),
+                properties=pika.BasicProperties(content_type="application/json", delivery_mode=2),
+            )
+            print(
+                "[rabbitmq-worker] published result "
+                f"{result.get('taskId')} success={result.get('success')} "
+                f"partial={result.get('partial')} completed={result.get('completed')}"
+            )
+
+        result = _handle_story_task(task, publish_result)
+        publish_result(result)
         ch.basic_ack(delivery_tag=method.delivery_tag)
-        print(f"[rabbitmq-worker] published result {result.get('taskId')} success={result.get('success')}")
 
     channel.basic_consume(queue=REQUEST_QUEUE, on_message_callback=on_message)
     print(f"[rabbitmq-worker] consuming queue={REQUEST_QUEUE} host={config['host']}:{config['port']}")
     channel.start_consuming()
 
 
-def _handle_story_task(task: dict[str, Any]) -> dict[str, Any]:
+def _handle_story_task(
+    task: dict[str, Any],
+    publish_progress: Any | None = None,
+) -> dict[str, Any]:
     """作用：按任务类型调用 story_ai 中已有的大模型函数，并封装 Java 可消费的结果消息。
     调用方：_consume_forever 的 RabbitMQ 消息回调。
     """
@@ -113,6 +124,8 @@ def _handle_story_task(task: dict[str, Any]) -> dict[str, Any]:
         "errorMessage": None,
         "storyOutline": None,
         "volumeOutline": None,
+        "partial": False,
+        "completed": False,
     }
 
     try:
@@ -139,6 +152,16 @@ def _handle_story_task(task: dict[str, Any]) -> dict[str, Any]:
             )
             result["storyOutline"] = response.model_dump(by_alias=True)
         elif task_type == TASK_VOLUME_GENERATE:
+            def publish_volume(volume: Any) -> None:
+                if not publish_progress:
+                    return
+                progress_result = _base_result(task)
+                progress_result["success"] = True
+                progress_result["partial"] = True
+                progress_result["completed"] = False
+                progress_result["volumeOutline"] = {"volumes": [volume.model_dump(by_alias=True)]}
+                publish_progress(progress_result)
+
             response = generate_volume_outline(
                 StoryVolumeOutlineGenerateRequest(
                     userId=task.get("userId"),
@@ -147,9 +170,11 @@ def _handle_story_task(task: dict[str, Any]) -> dict[str, Any]:
                     storySummary=task.get("storySummary"),
                     outline=task.get("outline") or "",
                     mainCharacters=task.get("mainCharacters") or [],
-                )
+                ),
+                on_volume_generated=publish_volume,
             )
-            result["volumeOutline"] = response.model_dump(by_alias=True)
+            result["completed"] = True
+            result["volumeOutline"] = None
         elif task_type == TASK_VOLUME_REVISE:
             response = revise_volume_outline(
                 StoryVolumeOutlineReviseRequest(
@@ -164,15 +189,36 @@ def _handle_story_task(task: dict[str, Any]) -> dict[str, Any]:
                 )
             )
             result["volumeOutline"] = response.model_dump(by_alias=True)
+            result["completed"] = True
         else:
             raise ValueError(f"Unsupported AI story task type: {task_type}")
 
         result["success"] = True
+        if task_type in {TASK_STORY_GENERATE, TASK_STORY_REVISE}:
+            result["completed"] = True
     except Exception as exc:
         result["errorMessage"] = str(exc)
         print(f"[rabbitmq-worker] task {task.get('taskId')} failed: {exc}")
 
     return result
+
+
+def _base_result(task: dict[str, Any]) -> dict[str, Any]:
+    """作用：创建 RabbitMQ AI 结果消息的公共字段骨架。
+    调用方：_handle_story_task 以及分卷逐卷进度回调。
+    """
+    return {
+        "taskId": task.get("taskId"),
+        "taskType": task.get("taskType"),
+        "userId": task.get("userId"),
+        "storyId": task.get("storyId"),
+        "success": False,
+        "errorMessage": None,
+        "storyOutline": None,
+        "volumeOutline": None,
+        "partial": False,
+        "completed": False,
+    }
 
 
 def _load_rabbitmq_config() -> dict[str, Any]:
