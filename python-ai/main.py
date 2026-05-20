@@ -6,13 +6,21 @@ from typing import Any
 
 import uvicorn
 import yaml
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from langchain_community.chat_models import ChatTongyi
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
-from prompt import prompt_ChatAgent, prompt_Outline, prompt_ReviseOutline, prompt_VolumeOutline
+from prompt import (
+    prompt_ChatAgent,
+    prompt_Outline,
+    prompt_ReviseOutline,
+    prompt_VolumeCount,
+    prompt_VolumeOutline,
+    prompt_VolumeOutlineSingle,
+    prompt_VolumeOutline_Editor,
+)
 
 
 def load_tongyi_api_key() -> str:
@@ -39,6 +47,12 @@ promptTemplate_ReviseOutline = PromptTemplate.from_template(prompt_ReviseOutline
 
 promptTemplate_VolumeOutline = PromptTemplate.from_template(prompt_VolumeOutline)
 
+promptTemplate_VolumeCount = PromptTemplate.from_template(prompt_VolumeCount)
+
+promptTemplate_VolumeOutlineSingle = PromptTemplate.from_template(prompt_VolumeOutlineSingle)
+
+promptTemplate_VolumeOutlineEditor = PromptTemplate.from_template(prompt_VolumeOutline_Editor)
+
 promptTemplate_ChatAgent = PromptTemplate.from_template(prompt_ChatAgent)
 
 llm = ChatTongyi(
@@ -46,6 +60,20 @@ llm = ChatTongyi(
     temperature=0.5,
     top_p=0.8,
     streaming=True,
+)
+
+llm_temperature_0 = ChatTongyi(
+    model="qwen-max",
+    temperature=0,
+    top_p=0.2,
+    streaming=False,
+)
+
+structured_llm_base = ChatTongyi(
+    model="qwen-max",
+    temperature=0.5,
+    top_p=0.8,
+    streaming=False,
 )
 
 app = FastAPI(title="Aisay Python AI Engine")
@@ -221,6 +249,21 @@ class VolumeOutlineItem(BaseModel):
     ending_hook: str = Field(alias="endingHook", description="The cliffhanger or hook at the end of this volume")
 
 
+class StoryVolumeOutlineReviseRequest(BaseModel):
+    """分卷大纲自动修改请求体。
+    对应 Java 端 AiEngineClient.reviseVolumeOutline 的入参，包含原故事上下文、现有分卷大纲和用户修改意见。
+    """
+
+    user_id: int = Field(alias="userId")
+    story_id: int = Field(alias="storyId")
+    title: str
+    story_summary: str | None = Field(default=None, alias="storySummary")
+    outline: str
+    main_characters: list[MainCharacterSetting] = Field(default_factory=list, alias="mainCharacters")
+    volume_outlines: list[VolumeOutlineItem] = Field(default_factory=list, alias="volumeOutlines")
+    suggestion: str
+
+
 class StoryVolumeOutlineGenerateResponse(BaseModel):
     """分卷大纲生成响应体。
 
@@ -295,14 +338,62 @@ class OutlineRevisionOutput(BaseModel):
     )
 
 
+class VolumeCountOutput(BaseModel):
+    """分卷数量规划结构化输出模型。
+    由温度为 0 的模型先判断总分卷数，再供逐卷生成链路使用。
+    """
+
+    volume_count: int = Field(
+        ge=5,
+        le=20,
+        description="Recommended total volume count, constrained to an integer between 5 and 20",
+    )
+
+
 class VolumeOutlineOutput(BaseModel):
     """分卷大纲结构化输出模型。
 
-    定义大模型返回的分卷大纲结构，包含 5-8 卷的详细大纲列表。
+    定义大模型返回的分卷大纲结构，承载多卷详细大纲列表。
     通过 LangChain 的 with_structured_output 绑定使用。
     """
 
-    volumes: list[VolumeOutlineItem] = Field(description="5-8 detailed volume outlines")
+    volumes: list[VolumeOutlineItem] = Field(description="Detailed volume outline list")
+
+
+def build_characters_text(main_characters: list[MainCharacterSetting]) -> str:
+    """作用：把结构化角色设定压缩为提示词可读文本。
+    调用方：generate_volume_outline、revise_volume_outline。
+    """
+    return "\n".join(
+        [
+            (
+                f"- {character.name}: {character.role or ''}; "
+                f"{character.description or ''}; {character.personality or ''}; "
+                f"appearance={character.appearance or {}}"
+            )
+            for character in main_characters
+        ]
+    ) or "No character settings were provided."
+
+
+def format_volume_outline_context(volumes: list[VolumeOutlineItem]) -> str:
+    """作用：把已经生成或已经存在的分卷大纲整理为下一次模型调用的上下文。
+    调用方：generate_volume_outline、revise_volume_outline。
+    """
+    if not volumes:
+        return "暂无"
+
+    return "\n\n".join(
+        [
+            (
+                f"第 {volume.volume_number} 卷：{volume.title}\n"
+                f"摘要：{volume.summary}\n"
+                f"详细大纲：\n{volume.content}\n"
+                f"卷末钩子：{volume.ending_hook}"
+            )
+            for volume in volumes
+        ]
+    )
 
 
 @app.post("/api/story/outline", response_model=StoryOutlineGenerateResponse)
@@ -319,9 +410,9 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
         started_at,
     )
 
-    structured_llm = llm.with_structured_output(NovelOutlineOutput)
+    structured_llm = structured_llm_base.with_structured_output(NovelOutlineOutput)
     chain = promptTemplate_Outline | structured_llm
-    log_progress(trace_id, "structured chain created, invoking Tongyi model without a generation time limit", started_at)
+    log_progress(trace_id, "structured chain created, invoking Tongyi model in non-streaming mode", started_at)
 
     result = chain.invoke(
         {
@@ -363,9 +454,9 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
         f"故事摘要：{request.synopsis or ''}\n\n"
         f"剧情大纲：\n{request.outline}"
     )
-    structured_llm = llm.with_structured_output(OutlineRevisionOutput)
+    structured_llm = structured_llm_base.with_structured_output(OutlineRevisionOutput)
     chain = promptTemplate_ReviseOutline | structured_llm
-    log_progress(trace_id, "structured revision chain created, invoking Tongyi model", started_at, scope)
+    log_progress(trace_id, "structured revision chain created, invoking Tongyi model in non-streaming mode", started_at, scope)
     result = chain.invoke(
         {
             "OriginalOutline": original_outline,
@@ -386,13 +477,16 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
 
 @app.post("/api/story/volume-outline", response_model=StoryVolumeOutlineGenerateResponse)
 def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> StoryVolumeOutlineGenerateResponse:
-    """作用：基于已保存的剧情大纲和角色设定生成 5 到 8 卷的详细分卷大纲。
+    """作用：基于已保存的剧情大纲和角色设定生成 8 到 15 卷的详细分卷大纲。
 
     调用方：Java AiEngineClient.generateVolumeOutline，即 StoryServiceImpl#generateVolumeOutline 的 Python 后端接口。
     """
     trace_id = uuid.uuid4().hex[:8]
     started_at = time.perf_counter()
     scope = "volume-outline"
+    if not request.outline or not request.outline.strip():
+        raise HTTPException(status_code=400, detail="Story outline is required before generating volume outlines")
+
     log_progress(
         trace_id,
         f"request accepted, user_id={request.user_id}, story_id={request.story_id}, title={request.title}",
@@ -400,17 +494,12 @@ def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> Story
         scope,
     )
 
-    characters_text = "\n".join(
-        [
-            f"- {character.name}: {character.role or ''}; {character.description or ''}; {character.personality or ''}"
-            for character in request.main_characters
-        ]
-    ) or "No character settings were provided."
+    characters_text = build_characters_text(request.main_characters)
 
-    structured_llm = llm.with_structured_output(VolumeOutlineOutput)
-    chain = promptTemplate_VolumeOutline | structured_llm
-    log_progress(trace_id, "structured volume chain created, invoking Tongyi model", started_at, scope)
-    result = chain.invoke(
+    count_llm = llm_temperature_0.with_structured_output(VolumeCountOutput)
+    count_chain = promptTemplate_VolumeCount | count_llm
+    log_progress(trace_id, "planning total volume count with temperature=0 structured output", started_at, scope)
+    count_result = count_chain.invoke(
         {
             "Title": request.title,
             "StorySummary": request.story_summary or "",
@@ -419,11 +508,85 @@ def generate_volume_outline(request: StoryVolumeOutlineGenerateRequest) -> Story
         },
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
     )
+    total_volumes = count_result.volume_count
+    log_progress(trace_id, f"volume count planned: {total_volumes}", started_at, scope)
 
-    log_progress(trace_id, "model returned volume outline, preparing HTTP response", started_at, scope)
-    response = StoryVolumeOutlineGenerateResponse(volumes=result.volumes)
+    single_volume_llm = structured_llm_base.with_structured_output(VolumeOutlineItem)
+    single_volume_chain = promptTemplate_VolumeOutlineSingle | single_volume_llm
+    generated_volumes: list[VolumeOutlineItem] = []
+    for volume_number in range(1, total_volumes + 1):
+        log_progress(trace_id, f"generating volume {volume_number}/{total_volumes}", started_at, scope)
+        volume = single_volume_chain.invoke(
+            {
+                "Title": request.title,
+                "StorySummary": request.story_summary or "",
+                "Outline": request.outline,
+                "Characters": characters_text,
+                "TotalVolumes": total_volumes,
+                "CurrentVolumeNumber": volume_number,
+                "GeneratedVolumeOutlines": format_volume_outline_context(generated_volumes),
+            },
+            config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+        )
+        volume.volume_number = volume_number
+        generated_volumes.append(volume)
+        log_progress(trace_id, f"volume {volume_number}/{total_volumes} generated: {volume.title}", started_at, scope)
+
+    if not generated_volumes:
+        raise HTTPException(status_code=502, detail="Tongyi model returned no volume outlines")
+
+    log_progress(trace_id, f"model returned {len(generated_volumes)} volume outlines, preparing HTTP response", started_at, scope)
+    response = StoryVolumeOutlineGenerateResponse(volumes=generated_volumes)
     log_progress(trace_id, "response ready", started_at, scope)
-    print("修改成功")
+    return response
+
+
+@app.post("/api/story/volume-outline/revise", response_model=StoryVolumeOutlineGenerateResponse)
+def revise_volume_outline(request: StoryVolumeOutlineReviseRequest) -> StoryVolumeOutlineGenerateResponse:
+    """作用：根据用户修改意见、原分卷大纲和故事上下文自动重写分卷大纲。
+    调用方：Java AiEngineClient.reviseVolumeOutline，即 StoryServiceImpl#reviseVolumeOutline 的 Python 后端接口。
+    """
+    trace_id = uuid.uuid4().hex[:8]
+    started_at = time.perf_counter()
+    scope = "volume-outline-revise"
+    if not request.outline or not request.outline.strip():
+        raise HTTPException(status_code=400, detail="Story outline is required before revising volume outlines")
+    if not request.volume_outlines:
+        raise HTTPException(status_code=400, detail="Existing volume outlines are required before revision")
+    if not request.suggestion or not request.suggestion.strip():
+        raise HTTPException(status_code=400, detail="Modification request is required")
+
+    log_progress(
+        trace_id,
+        f"revision request accepted, user_id={request.user_id}, story_id={request.story_id}, title={request.title}",
+        started_at,
+        scope,
+    )
+
+    characters_text = build_characters_text(request.main_characters)
+    existing_volume_outline = format_volume_outline_context(request.volume_outlines)
+
+    structured_llm = structured_llm_base.with_structured_output(VolumeOutlineOutput)
+    chain = promptTemplate_VolumeOutlineEditor | structured_llm
+    log_progress(trace_id, "structured volume revision chain created, invoking Tongyi model in non-streaming mode", started_at, scope)
+    result = chain.invoke(
+        {
+            "Title": request.title,
+            "StorySummary": request.story_summary or "",
+            "Outline": request.outline,
+            "Characters": characters_text,
+            "ExistingVolumeOutline": existing_volume_outline,
+            "ModificationRequest": request.suggestion,
+        },
+        config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+    )
+
+    if not result.volumes:
+        raise HTTPException(status_code=502, detail="Tongyi model returned no revised volume outlines")
+
+    log_progress(trace_id, f"model returned {len(result.volumes)} revised volume outlines", started_at, scope)
+    response = StoryVolumeOutlineGenerateResponse(volumes=result.volumes)
+    log_progress(trace_id, "revision response ready", started_at, scope)
     return response
 
 
@@ -443,9 +606,9 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
         scope,
     )
 
-    structured_llm = llm.with_structured_output(ChatAgentOutput)
+    structured_llm = structured_llm_base.with_structured_output(ChatAgentOutput)
     chain = promptTemplate_ChatAgent | structured_llm
-    log_progress(trace_id, "rewriting question and routing to Java method", started_at, scope)
+    log_progress(trace_id, "rewriting question and routing to Java method in non-streaming mode", started_at, scope)
     result = chain.invoke(
         {
             "Title": request.title,

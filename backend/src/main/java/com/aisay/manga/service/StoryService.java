@@ -4,6 +4,8 @@ import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
 import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.request.StoryUpdateRequest;
+import com.aisay.manga.dto.request.StoryVolumeOutlineReviseRequest;
+import com.aisay.manga.dto.request.StoryVolumeOutlineUpdateRequest;
 import com.aisay.manga.dto.response.StoryDetailResponse;
 import com.aisay.manga.dto.response.StoryResponse;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
@@ -33,6 +35,18 @@ public interface StoryService {
      * 调用方：StoryController#generateVolumeOutline。
      */
     StoryDetailResponse generateVolumeOutline(Long storyId, Long userId);
+
+    /**
+     * 作用：根据用户修改意见调用 AI 自动修改并保存分卷大纲。
+     * 调用方：StoryController#reviseVolumeOutline。
+     */
+    StoryDetailResponse reviseVolumeOutline(Long storyId, Long userId, StoryVolumeOutlineReviseRequest request);
+
+    /**
+     * 作用：手动保存用户编辑后的分卷大纲列表。
+     * 调用方：StoryController#updateVolumeOutlines。
+     */
+    StoryDetailResponse updateVolumeOutlines(Long storyId, Long userId, StoryVolumeOutlineUpdateRequest request);
 
     /**
      * 作用：查询故事详情。

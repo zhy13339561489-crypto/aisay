@@ -8,6 +8,7 @@ import com.aisay.manga.dto.ai.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.ai.StoryOutlineReviseResponse;
 import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateRequest;
 import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateResponse;
+import com.aisay.manga.dto.ai.StoryVolumeOutlineReviseRequest;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -27,6 +28,8 @@ public class AiEngineClient {
 
     private final String storyVolumeOutlinePath;
 
+    private final String storyVolumeOutlineRevisePath;
+
     private final String chatAgentPath;
 
     /**
@@ -39,6 +42,7 @@ public class AiEngineClient {
             @Value("${ai.engine.story-outline-path:/api/story/outline}") String storyOutlinePath,
             @Value("${ai.engine.story-outline-revise-path:/api/story/outline/revise}") String storyOutlineRevisePath,
             @Value("${ai.engine.story-volume-outline-path:/api/story/volume-outline}") String storyVolumeOutlinePath,
+            @Value("${ai.engine.story-volume-outline-revise-path:/api/story/volume-outline/revise}") String storyVolumeOutlineRevisePath,
             @Value("${ai.engine.chat-agent-path:/api/chat/agent}") String chatAgentPath
     ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
@@ -52,6 +56,7 @@ public class AiEngineClient {
         this.storyOutlinePath = storyOutlinePath;
         this.storyOutlineRevisePath = storyOutlineRevisePath;
         this.storyVolumeOutlinePath = storyVolumeOutlinePath;
+        this.storyVolumeOutlineRevisePath = storyVolumeOutlineRevisePath;
         this.chatAgentPath = chatAgentPath;
     }
 
@@ -115,6 +120,27 @@ public class AiEngineClient {
             return response;
         } catch (RestClientException ex) {
             throw new IllegalStateException("Python volume outline API is unavailable: " + storyVolumeOutlinePath, ex);
+        }
+    }
+
+    /**
+     * 作用：调用 Python /api/story/volume-outline/revise 根据修改意见自动重写分卷大纲。
+     * 调用方：StoryServiceImpl#reviseVolumeOutline。
+     */
+    public StoryVolumeOutlineGenerateResponse reviseVolumeOutline(StoryVolumeOutlineReviseRequest request) {
+        try {
+            StoryVolumeOutlineGenerateResponse response = restClient.post()
+                    .uri(storyVolumeOutlineRevisePath)
+                    .body(request)
+                    .retrieve()
+                    .body(StoryVolumeOutlineGenerateResponse.class);
+
+            if (response == null) {
+                throw new IllegalStateException("Python AI engine returned empty response");
+            }
+            return response;
+        } catch (RestClientException ex) {
+            throw new IllegalStateException("Python volume outline revise API is unavailable: " + storyVolumeOutlineRevisePath, ex);
         }
     }
 

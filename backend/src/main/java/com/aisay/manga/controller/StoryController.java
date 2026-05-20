@@ -4,6 +4,8 @@ import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
 import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.request.StoryUpdateRequest;
+import com.aisay.manga.dto.request.StoryVolumeOutlineReviseRequest;
+import com.aisay.manga.dto.request.StoryVolumeOutlineUpdateRequest;
 import com.aisay.manga.dto.response.ApiResponse;
 import com.aisay.manga.dto.response.StoryDetailResponse;
 import com.aisay.manga.dto.response.StoryResponse;
@@ -75,6 +77,30 @@ public class StoryController {
     @PostMapping("/{id}/volume-outline/generate")
     public ApiResponse<StoryDetailResponse> generateVolumeOutline(@PathVariable Long id) {
         return ApiResponse.success("Volume outline generated", storyService.generateVolumeOutline(id, SecurityUtils.getCurrentUserId()));
+    }
+
+    /**
+     * 作用：根据用户输入的修改意见调用 Python 自动修改分卷大纲，并将结果保存回分卷大纲表。
+     * 调用方：前端故事详情页“自动修改分卷大纲”按钮请求 POST /api/story/{id}/volume-outline/revise。
+     */
+    @PostMapping("/{id}/volume-outline/revise")
+    public ApiResponse<StoryDetailResponse> reviseVolumeOutline(
+            @PathVariable Long id,
+            @Valid @RequestBody StoryVolumeOutlineReviseRequest request
+    ) {
+        return ApiResponse.success("Volume outline revised", storyService.reviseVolumeOutline(id, SecurityUtils.getCurrentUserId(), request));
+    }
+
+    /**
+     * 作用：保存用户手动编辑后的分卷大纲列表。
+     * 调用方：前端故事详情页“手动修改分卷大纲”弹窗请求 PUT /api/story/{id}/volume-outline。
+     */
+    @PutMapping("/{id}/volume-outline")
+    public ApiResponse<StoryDetailResponse> updateVolumeOutlines(
+            @PathVariable Long id,
+            @Valid @RequestBody StoryVolumeOutlineUpdateRequest request
+    ) {
+        return ApiResponse.success("Volume outline updated", storyService.updateVolumeOutlines(id, SecurityUtils.getCurrentUserId(), request));
     }
 
     /**

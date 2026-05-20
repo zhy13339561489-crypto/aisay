@@ -68,18 +68,51 @@
       <section class="panel volume-panel">
         <div class="section-heading">
           <h2>分卷大纲</h2>
-          <el-button
-            type="success"
-            plain
-            :loading="storyStore.isGeneratingVolumeOutline"
-            @click="generateVolumeOutline"
-          >
-            {{ hasVolumeOutlines ? '重新生成分卷大纲' : '分卷大纲生成' }}
-          </el-button>
+          <div class="volume-toolbar">
+            <el-select
+              v-if="hasVolumeOutlines"
+              v-model="selectedVolumeNumber"
+              class="volume-filter"
+              placeholder="选择显示范围"
+            >
+              <el-option label="全部显示" :value="0" />
+              <el-option
+                v-for="volume in story.volumeOutlines"
+                :key="volume.id || volume.volumeNumber"
+                :label="`第 ${volume.volumeNumber} 卷`"
+                :value="volume.volumeNumber"
+              />
+            </el-select>
+            <el-button
+              type="success"
+              plain
+              :loading="storyStore.isGeneratingVolumeOutline"
+              @click="generateVolumeOutline"
+            >
+              {{ hasVolumeOutlines ? '重新生成分卷大纲' : '分卷大纲生成' }}
+            </el-button>
+            <el-button
+              v-if="hasVolumeOutlines"
+              type="primary"
+              plain
+              :loading="storyStore.isRevisingVolumeOutline"
+              @click="openVolumeReviseDialog"
+            >
+              自动修改分卷大纲
+            </el-button>
+            <el-button
+              v-if="hasVolumeOutlines"
+              type="primary"
+              plain
+              @click="openVolumeManualEditDialog"
+            >
+              手动修改分卷大纲
+            </el-button>
+          </div>
         </div>
         <div v-if="hasVolumeOutlines" class="volume-list">
           <article
-            v-for="volume in story.volumeOutlines"
+            v-for="volume in displayedVolumeOutlines"
             :key="volume.id"
             class="volume-card"
           >
@@ -215,6 +248,85 @@
         <el-button type="primary" :loading="isRevising" @click="submitOutlineRevision">提交修改</el-button>
       </template>
     </el-dialog>
+
+    <el-dialog v-model="volumeReviseDialogVisible" title="自动修改分卷大纲" width="620px">
+      <el-form label-position="top">
+        <el-form-item label="请输入你希望如何修改分卷大纲">
+          <el-input
+            v-model="volumeReviseSuggestion"
+            type="textarea"
+            :autosize="{ minRows: 5, maxRows: 10 }"
+            maxlength="5000"
+            show-word-limit
+            placeholder="例如：第三卷增加一次重大反转，压缩前两卷铺垫，把女主线提前到第一卷结尾。"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="volumeReviseDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="storyStore.isRevisingVolumeOutline" @click="submitVolumeRevision">
+          提交自动修改
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <el-dialog v-model="volumeManualDialogVisible" title="手动修改分卷大纲" width="920px">
+      <el-form label-position="top" :model="volumeManualForm">
+        <div class="manual-characters-header">
+          <h3>分卷列表</h3>
+          <el-button type="primary" plain @click="addManualVolume">新增分卷</el-button>
+        </div>
+        <div class="manual-volume-list">
+          <el-card v-for="(volume, index) in volumeManualForm.volumes" :key="index" shadow="never">
+            <template #header>
+              <div class="character-edit-title">
+                <span>第 {{ volume.volumeNumber || index + 1 }} 卷</span>
+                <el-button link type="danger" @click="removeManualVolume(index)">删除</el-button>
+              </div>
+            </template>
+            <div class="volume-edit-grid">
+              <el-form-item label="卷号">
+                <el-input-number v-model="volume.volumeNumber" :min="1" :step="1" />
+              </el-form-item>
+              <el-form-item label="卷名">
+                <el-input v-model.trim="volume.title" maxlength="200" show-word-limit />
+              </el-form-item>
+            </div>
+            <el-form-item label="摘要">
+              <el-input
+                v-model="volume.summary"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+                maxlength="2000"
+                show-word-limit
+              />
+            </el-form-item>
+            <el-form-item label="详细大纲">
+              <el-input
+                v-model="volume.content"
+                type="textarea"
+                :autosize="{ minRows: 6, maxRows: 12 }"
+              />
+            </el-form-item>
+            <el-form-item label="卷末钩子">
+              <el-input
+                v-model="volume.endingHook"
+                type="textarea"
+                :autosize="{ minRows: 2, maxRows: 5 }"
+                maxlength="2000"
+                show-word-limit
+              />
+            </el-form-item>
+          </el-card>
+        </div>
+      </el-form>
+      <template #footer>
+        <el-button @click="volumeManualDialogVisible = false">取消</el-button>
+        <el-button type="primary" :loading="storyStore.isSavingVolumeOutline" @click="saveManualVolumeOutlines">
+          保存分卷大纲
+        </el-button>
+      </template>
+    </el-dialog>
   </section>
 </template>
 
@@ -224,7 +336,7 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import { useRouter } from 'vue-router';
 import CharacterCard from '../components/story/CharacterCard.vue';
 import { useStoryStore } from '../stores/storyStore';
-import type { StoryCharacter } from '../types/story';
+import type { StoryCharacter, StoryVolumeOutlineUpdateItem } from '../types/story';
 
 interface EditableCharacter {
   name: string;
@@ -232,6 +344,14 @@ interface EditableCharacter {
   description: string;
   personality: string;
   appearanceText: string;
+}
+
+interface EditableVolumeOutline {
+  volumeNumber: number;
+  title: string;
+  summary: string;
+  content: string;
+  endingHook: string;
 }
 
 const props = defineProps<{
@@ -243,10 +363,13 @@ const storyStore = useStoryStore();
 const editDialogVisible = ref(false);
 const manualEditDialogVisible = ref(false);
 const reviseDialogVisible = ref(false);
+const volumeReviseDialogVisible = ref(false);
+const volumeManualDialogVisible = ref(false);
 const isSaving = ref(false);
 const isManualSaving = ref(false);
 const isRevising = ref(false);
 const reviseSuggestion = ref('');
+const volumeReviseSuggestion = ref('');
 const editForm = reactive({
   title: '',
   genre: '',
@@ -258,16 +381,41 @@ const manualForm = reactive({
   fullContent: '',
   characters: [] as EditableCharacter[],
 });
+const volumeManualForm = reactive({
+  volumes: [] as EditableVolumeOutline[],
+});
+const selectedVolumeNumber = ref(0);
 
 const story = computed(() => storyStore.currentStory);
 const hasVolumeOutlines = computed(() => (story.value?.volumeOutlines?.length || 0) > 0);
+const displayedVolumeOutlines = computed(() => {
+  const volumes = story.value?.volumeOutlines || [];
+  if (selectedVolumeNumber.value === 0) {
+    return volumes;
+  }
+  return volumes.filter((volume) => volume.volumeNumber === selectedVolumeNumber.value);
+});
 
 onMounted(loadStory);
 
 watch(
   () => props.id,
   () => {
+    selectedVolumeNumber.value = 0;
     loadStory();
+  },
+);
+
+watch(
+  () => story.value?.volumeOutlines?.map((volume) => volume.volumeNumber).join(',') || '',
+  () => {
+    if (selectedVolumeNumber.value === 0) {
+      return;
+    }
+    const stillExists = story.value?.volumeOutlines?.some((volume) => volume.volumeNumber === selectedVolumeNumber.value);
+    if (!stillExists) {
+      selectedVolumeNumber.value = 0;
+    }
   },
 );
 
@@ -431,6 +579,92 @@ async function generateVolumeOutline() {
   ElMessage.success('分卷大纲已生成并保存');
 }
 
+function openVolumeReviseDialog() {
+  if (!hasVolumeOutlines.value) {
+    ElMessage.warning('请先生成分卷大纲');
+    return;
+  }
+  volumeReviseSuggestion.value = '';
+  volumeReviseDialogVisible.value = true;
+}
+
+async function submitVolumeRevision() {
+  if (!story.value) {
+    return;
+  }
+
+  const suggestion = volumeReviseSuggestion.value.trim();
+  if (!suggestion) {
+    ElMessage.warning('请输入分卷大纲修改意见');
+    return;
+  }
+
+  await storyStore.reviseVolumeOutline(story.value.id, { suggestion });
+  ElMessage.success('分卷大纲已自动修改并保存');
+  volumeReviseDialogVisible.value = false;
+}
+
+function openVolumeManualEditDialog() {
+  if (!story.value || !hasVolumeOutlines.value) {
+    ElMessage.warning('请先生成分卷大纲');
+    return;
+  }
+
+  volumeManualForm.volumes = story.value.volumeOutlines.map((volume, index) => ({
+    volumeNumber: volume.volumeNumber || index + 1,
+    title: volume.title || '',
+    summary: volume.summary || '',
+    content: volume.content || '',
+    endingHook: volume.endingHook || '',
+  }));
+  volumeManualDialogVisible.value = true;
+}
+
+function addManualVolume() {
+  volumeManualForm.volumes.push({
+    volumeNumber: volumeManualForm.volumes.length + 1,
+    title: '',
+    summary: '',
+    content: '',
+    endingHook: '',
+  });
+}
+
+function removeManualVolume(index: number) {
+  volumeManualForm.volumes.splice(index, 1);
+  volumeManualForm.volumes.forEach((volume, volumeIndex) => {
+    if (!volume.volumeNumber) {
+      volume.volumeNumber = volumeIndex + 1;
+    }
+  });
+}
+
+async function saveManualVolumeOutlines() {
+  if (!story.value) {
+    return;
+  }
+  if (volumeManualForm.volumes.length === 0) {
+    ElMessage.warning('请至少保留一个分卷');
+    return;
+  }
+
+  const volumes: StoryVolumeOutlineUpdateItem[] = volumeManualForm.volumes.map((volume, index) => ({
+    volumeNumber: Number(volume.volumeNumber) || index + 1,
+    title: volume.title.trim(),
+    summary: volume.summary,
+    content: volume.content,
+    endingHook: volume.endingHook,
+  }));
+  if (volumes.some((volume) => !volume.title)) {
+    ElMessage.warning('每个分卷都需要填写卷名');
+    return;
+  }
+
+  await storyStore.updateVolumeOutlines(story.value.id, { volumes });
+  ElMessage.success('分卷大纲已手动保存');
+  volumeManualDialogVisible.value = false;
+}
+
 async function confirmDelete() {
   if (!story.value) {
     return;
@@ -522,6 +756,17 @@ h3 {
   justify-content: flex-end;
 }
 
+.volume-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.volume-filter {
+  width: 160px;
+}
+
 .section-heading,
 .manual-characters-header,
 .character-edit-title {
@@ -552,13 +797,15 @@ h3 {
 }
 
 .character-grid,
-.manual-character-list {
+.manual-character-list,
+.manual-volume-list {
   display: grid;
   gap: 14px;
   margin-top: 16px;
 }
 
-.character-edit-grid {
+.character-edit-grid,
+.volume-edit-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -605,7 +852,8 @@ h3 {
 @media (max-width: 900px) {
   .detail-hero,
   .content-grid,
-  .character-edit-grid {
+  .character-edit-grid,
+  .volume-edit-grid {
     grid-template-columns: 1fr;
   }
 
@@ -616,6 +864,11 @@ h3 {
 
   .hero-actions {
     justify-content: flex-start;
+  }
+
+  .volume-toolbar,
+  .volume-filter {
+    width: 100%;
   }
 }
 </style>

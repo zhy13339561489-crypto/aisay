@@ -1136,3 +1136,60 @@
 ### 后续扩展建议
 
 - [ ] 如需分卷大纲、章节生成、角色增删、世界观设定等更多能力，只需在 Java 白名单中新增方法，并在 Python Agent 提示词中加入对应 `javaMethod` 和参数结构。
+## 2026-05-20 分卷大纲自动修改与手动修改
+
+### 2026-05-20 分卷大纲生成改为两阶段逐卷生成
+- [x] 新增 `prompt_VolumeCount`，用于让温度为 0 的模型先判断故事应拆分为多少个分卷。
+- [x] 新增 `prompt_VolumeOutlineSingle`，用于按当前卷号逐卷生成分卷大纲。
+- [x] 新增 `VolumeCountOutput`，通过 `with_structured_output()` 约束输出字段 `volume_count`，并限制为 5 到 20 的整数。
+- [x] 修改 `generate_volume_outline`：先调用 `llm_temperature_0.with_structured_output(VolumeCountOutput)` 获取总分卷数，再按卷号循环生成每一卷。
+- [x] 单卷生成时会传入故事总大纲、主要角色设定、总分卷数、当前卷号和已经生成的前序分卷大纲，保证分卷之间前后承接。
+- [x] 每生成一卷都会写入 Python 控制台阶段日志，便于观察当前生成到第几卷。
+- [x] 保留旧的整体分卷提示词 `prompt_VolumeOutline`，但当前生成流程不再使用一次性生成全部分卷的方式。
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -c "import main; print('python import ok')"`。
+- [x] `git diff --check -- python-ai\main.py python-ai\prompt.py progress.md architecture.md` 通过；仅保留 Windows LF/CRLF 换行提示。
+
+### 2026-05-20 分卷生成异常修复
+- [x] 定位分卷大纲生成报错原因：`ChatTongyi` 在 `streaming=True` 与 `with_structured_output()` 组合使用时处理流式 tool_calls 增量出现 `IndexError: list index out of range`。
+- [x] 新增 `structured_llm_base`，专门用于 `with_structured_output()` 的结构化 JSON 输出，并设置 `streaming=False`。
+- [x] 将剧情大纲生成、大纲修改、分卷生成、分卷修改、对话 Agent 的结构化输出调用统一切换到 `structured_llm_base.with_structured_output(...)`。
+- [x] Python 控制台仍保留请求接收、模型开始调用、模型返回、响应封装等阶段进度日志；结构化输出调用不再打印 token 流，避免 Tongyi/LangChain 当前版本的流式 tool_calls 兼容问题。
+
+### 需要你做的事
+- [ ] 重启 Python FastAPI 服务后重新点击“分卷大纲生成”。
+- [ ] 如果仍报错，请把新的 Python 控制台日志中 `[volume-outline]` 开头的几行和完整 traceback 发给我。
+
+### 后端
+- [x] 新增 `StoryVolumeOutlineReviseRequest`，用于接收用户输入的分卷大纲自动修改意见。
+- [x] 新增 `StoryVolumeOutlineUpdateRequest`，用于接收前端手动编辑后的分卷大纲列表。
+- [x] 新增 Java AI DTO `StoryVolumeOutlineReviseRequest`，用于把故事上下文、原分卷大纲和修改意见转发给 Python FastAPI。
+- [x] `AiEngineClient` 新增 `reviseVolumeOutline`，默认调用 Python `/api/story/volume-outline/revise`。
+- [x] `StoryController` 新增 `POST /api/story/{id}/volume-outline/revise` 和 `PUT /api/story/{id}/volume-outline`。
+- [x] `StoryServiceImpl` 新增自动修改和手动保存逻辑，都会校验 story 归属，并整体替换当前 story 的 `story_volume_outlines` 记录。
+
+### Python FastAPI
+- [x] 接入你提供的 `prompt_VolumeOutline_Editor` 提示词。
+- [x] 新增 `POST /api/story/volume-outline/revise`。
+- [x] 自动修改接口会接收原故事摘要、剧情大纲、角色设定、现有分卷大纲和修改意见。
+- [x] 自动修改接口继续使用 `with_structured_output(VolumeOutlineOutput)`，固定返回 `volumes` 数组，字段与分卷生成保持一致。
+- [x] Python 控制台沿用流式/阶段进度日志，新增日志 scope 为 `volume-outline-revise`。
+
+### 前端
+- [x] `storyApi` / `storyStore` / `types/story.ts` 接入分卷大纲自动修改和手动保存接口。
+- [x] 故事详情页分卷大纲板块新增“自动修改分卷大纲”按钮。
+- [x] 自动修改弹窗支持输入修改意见，提交后调用大模型自动重写分卷并刷新页面数据。
+- [x] 故事详情页分卷大纲板块新增“手动修改分卷大纲”按钮。
+- [x] 手动修改弹窗会预填当前所有分卷，支持修改卷号、卷名、摘要、详细大纲、卷末钩子，并支持新增/删除分卷。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] 前端构建成功：`npm run build`。
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -c "import main; print('python import ok')"`。
+- [x] `git diff --check` 通过；仅保留 Windows LF/CRLF 换行提示。
+- [x] 前端构建仍有 Sass legacy JS API、Rollup 注释和大 chunk 提示，属于既有非阻断警告。
+
+### 需要你做的事
+- [ ] 重启 Python FastAPI，让 `/api/story/volume-outline/revise` 和新的提示词模板加载生效。
+- [ ] 重启 Java 后端，让新增接口和 `ai.engine.story-volume-outline-revise-path` 配置生效。
+- [ ] 前端刷新后进入某个已有分卷大纲的故事详情页，分别测试“自动修改分卷大纲”和“手动修改分卷大纲”。
+- [ ] 本次功能复用已有 `story_volume_outlines` 表，不需要新增 SQL。

@@ -9,6 +9,8 @@ import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
 import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
 import com.aisay.manga.dto.request.StoryUpdateRequest;
+import com.aisay.manga.dto.request.StoryVolumeOutlineReviseRequest;
+import com.aisay.manga.dto.request.StoryVolumeOutlineUpdateRequest;
 import com.aisay.manga.dto.response.StoryDetailResponse;
 import com.aisay.manga.dto.response.StoryResponse;
 import com.aisay.manga.entity.Character;
@@ -154,6 +156,9 @@ public class StoryServiceImpl implements StoryService {
     @Transactional
     public StoryDetailResponse generateVolumeOutline(Long storyId, Long userId) {
         Story story = getOwnedStory(storyId, userId);
+        if (story.getFullContent() == null || story.getFullContent().isBlank()) {
+            throw new IllegalArgumentException("Please generate or fill in the story outline before generating volume outlines.");
+        }
         List<Character> characters = characterMapper.selectList(new LambdaQueryWrapper<Character>()
                 .eq(Character::getStoryId, storyId)
                 .orderByAsc(Character::getId));
@@ -165,9 +170,68 @@ public class StoryServiceImpl implements StoryService {
                 story.getFullContent(),
                 characters.stream().map(this::toMainCharacterSetting).toList()
         ));
+        if (response.getVolumes() == null || response.getVolumes().isEmpty()) {
+            throw new IllegalStateException("Python AI engine did not return any volume outlines.");
+        }
 
-        storyVolumeOutlineMapper.delete(new LambdaQueryWrapper<StoryVolumeOutline>().eq(StoryVolumeOutline::getStoryId, storyId));
-        saveVolumeOutlines(storyId, response.getVolumes());
+        replaceVolumeOutlines(storyId, response.getVolumes());
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+        return getStoryDetail(storyId, userId);
+    }
+
+    /**
+     * 作用：读取现有分卷大纲，连同用户修改意见一起转发给 Python AI 自动重写，并替换保存新分卷。
+     * 调用方：StoryController#reviseVolumeOutline。
+     */
+    @Override
+    @Transactional
+    public StoryDetailResponse reviseVolumeOutline(Long storyId, Long userId, StoryVolumeOutlineReviseRequest request) {
+        Story story = getOwnedStory(storyId, userId);
+        List<StoryVolumeOutline> existingVolumes = getVolumeOutlineEntities(storyId);
+        if (existingVolumes.isEmpty()) {
+            throw new IllegalArgumentException("Please generate volume outlines before revising them.");
+        }
+        if (story.getFullContent() == null || story.getFullContent().isBlank()) {
+            throw new IllegalArgumentException("Story outline is required before revising volume outlines.");
+        }
+
+        List<Character> characters = characterMapper.selectList(new LambdaQueryWrapper<Character>()
+                .eq(Character::getStoryId, storyId)
+                .orderByAsc(Character::getId));
+        StoryVolumeOutlineGenerateResponse response = aiEngineClient.reviseVolumeOutline(new com.aisay.manga.dto.ai.StoryVolumeOutlineReviseRequest(
+                userId,
+                storyId,
+                story.getTitle(),
+                story.getSynopsis(),
+                story.getFullContent(),
+                characters.stream().map(this::toMainCharacterSetting).toList(),
+                existingVolumes.stream().map(this::toAiVolumeOutlineItem).toList(),
+                request.getSuggestion()
+        ));
+        if (response.getVolumes() == null || response.getVolumes().isEmpty()) {
+            throw new IllegalStateException("Python AI engine did not return any revised volume outlines.");
+        }
+
+        replaceVolumeOutlines(storyId, response.getVolumes());
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+        return getStoryDetail(storyId, userId);
+    }
+
+    /**
+     * 作用：保存用户手动编辑后的分卷大纲列表，整体替换当前 story 的旧分卷。
+     * 调用方：StoryController#updateVolumeOutlines。
+     */
+    @Override
+    @Transactional
+    public StoryDetailResponse updateVolumeOutlines(Long storyId, Long userId, StoryVolumeOutlineUpdateRequest request) {
+        Story story = getOwnedStory(storyId, userId);
+        List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumes = request.getVolumes().stream()
+                .map(this::toAiVolumeOutlineItem)
+                .toList();
+
+        replaceVolumeOutlines(storyId, volumes);
         story.setUpdatedAt(LocalDateTime.now());
         storyMapper.updateById(story);
         return getStoryDetail(storyId, userId);
@@ -183,10 +247,7 @@ public class StoryServiceImpl implements StoryService {
         List<Character> characters = characterMapper.selectList(new LambdaQueryWrapper<Character>()
                 .eq(Character::getStoryId, storyId)
                 .orderByAsc(Character::getId));
-        List<StoryVolumeOutline> volumeOutlines = storyVolumeOutlineMapper.selectList(new LambdaQueryWrapper<StoryVolumeOutline>()
-                .eq(StoryVolumeOutline::getStoryId, storyId)
-                .orderByAsc(StoryVolumeOutline::getVolumeNumber)
-                .orderByAsc(StoryVolumeOutline::getId));
+        List<StoryVolumeOutline> volumeOutlines = getVolumeOutlineEntities(storyId);
 
         StoryDetailResponse response = new StoryDetailResponse();
         fillStoryResponse(response, story);
@@ -311,6 +372,26 @@ public class StoryServiceImpl implements StoryService {
     }
 
     /**
+     * 作用：整体替换某个 story 的分卷大纲列表，保证数据库中的分卷顺序与最新提交一致。
+     * 调用方：generateVolumeOutline、reviseVolumeOutline、updateVolumeOutlines。
+     */
+    private void replaceVolumeOutlines(Long storyId, List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumes) {
+        storyVolumeOutlineMapper.delete(new LambdaQueryWrapper<StoryVolumeOutline>().eq(StoryVolumeOutline::getStoryId, storyId));
+        saveVolumeOutlines(storyId, volumes);
+    }
+
+    /**
+     * 作用：按卷号和主键顺序读取某个 story 的全部分卷大纲实体。
+     * 调用方：getStoryDetail、reviseVolumeOutline。
+     */
+    private List<StoryVolumeOutline> getVolumeOutlineEntities(Long storyId) {
+        return storyVolumeOutlineMapper.selectList(new LambdaQueryWrapper<StoryVolumeOutline>()
+                .eq(StoryVolumeOutline::getStoryId, storyId)
+                .orderByAsc(StoryVolumeOutline::getVolumeNumber)
+                .orderByAsc(StoryVolumeOutline::getId));
+    }
+
+    /**
      * 作用：校验故事存在且属于当前用户。
      * 调用方：reviseStoryOutline、updateStoryDetail、generateVolumeOutline、getStoryDetail、updateStory、deleteStory。
      */
@@ -387,6 +468,34 @@ public class StoryServiceImpl implements StoryService {
                 character.getDescription(),
                 character.getPersonality(),
                 character.getAppearance()
+        );
+    }
+
+    /**
+     * 作用：将数据库中的分卷大纲实体转换为 Python 自动修改接口需要的分卷 DTO。
+     * 调用方：reviseVolumeOutline。
+     */
+    private StoryVolumeOutlineGenerateResponse.VolumeOutlineItem toAiVolumeOutlineItem(StoryVolumeOutline volume) {
+        return new StoryVolumeOutlineGenerateResponse.VolumeOutlineItem(
+                volume.getVolumeNumber(),
+                volume.getTitle(),
+                volume.getSummary(),
+                volume.getContent(),
+                volume.getEndingHook()
+        );
+    }
+
+    /**
+     * 作用：将前端手动编辑提交的分卷条目转换为统一的分卷保存 DTO。
+     * 调用方：updateVolumeOutlines。
+     */
+    private StoryVolumeOutlineGenerateResponse.VolumeOutlineItem toAiVolumeOutlineItem(StoryVolumeOutlineUpdateRequest.VolumeOutlineUpdateItem item) {
+        return new StoryVolumeOutlineGenerateResponse.VolumeOutlineItem(
+                item.getVolumeNumber(),
+                item.getTitle(),
+                item.getSummary(),
+                item.getContent(),
+                item.getEndingHook()
         );
     }
 

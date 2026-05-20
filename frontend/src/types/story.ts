@@ -58,6 +58,22 @@ export interface StoryOutlineReviseRequest {
   suggestion: string;
 }
 
+export interface StoryVolumeOutlineReviseRequest {
+  suggestion: string;
+}
+
+export interface StoryVolumeOutlineUpdateItem {
+  volumeNumber: number;
+  title: string;
+  summary?: string;
+  content?: string;
+  endingHook?: string;
+}
+
+export interface StoryVolumeOutlineUpdateRequest {
+  volumes: StoryVolumeOutlineUpdateItem[];
+}
+
 export interface StoryDetailUpdateRequest {
   synopsis?: string;
   fullContent?: string;

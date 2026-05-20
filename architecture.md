@@ -863,3 +863,57 @@ Python `generate_story_outline` 继续使用 `with_structured_output(NovelOutlin
 Python Agent 会完成问题重写、路由分发和大模型结构化输出，固定返回 `rewrittenQuestion`、`route`、`javaMethod`、`javaMethodArgs`、`assistantMessage`。其中 `javaMethod` 表示希望 Java 执行的方法，`javaMethodArgs` 是对应参数。当前白名单支持 `story.updateOutline` 和 `story.none`：前者更新绑定漫剧的摘要、剧情大纲和主要角色设定，后者只返回回复不改数据库。
 
 Java 不会执行 Python 返回的任意方法名，而是通过白名单分发。这样 Python 负责理解用户意图和组织参数，Java 负责权限校验、数据库写入和业务一致性。后续如果要加入分卷大纲生成、章节生成、角色增删等能力，只需要同时扩展 Python Agent 提示词和 Java 白名单方法。
+## 分卷大纲修改模块
+
+分卷大纲现在支持“自动修改”和“手动修改”两条入口，二者都复用已有的一对多表 `story_volume_outlines`，不会新增数据库表。核心原则是：前端负责收集修改意图或编辑后的文本，Java 后端负责登录用户和 story 归属校验、事务保存与统一响应，Python FastAPI 只负责大模型生成和结构化输出。
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant View as StoryDetailView
+    participant Store as storyStore
+    participant Java as StoryController/StoryService
+    participant Python as FastAPI
+    participant LLM as Tongyi LangChain
+    participant DB as story_volume_outlines
+
+    User->>View: 输入分卷修改意见
+    View->>Store: reviseVolumeOutline(storyId, suggestion)
+    Store->>Java: POST /api/story/{id}/volume-outline/revise
+    Java->>Java: 校验 story 归属并读取原分卷
+    Java->>Python: POST /api/story/volume-outline/revise
+    Python->>LLM: prompt_VolumeOutline_Editor + with_structured_output
+    LLM-->>Python: volumes JSON
+    Python-->>Java: revised volumes
+    Java->>DB: 删除旧分卷并写入新分卷
+    Java-->>Store: StoryDetailResponse
+    Store-->>View: 刷新分卷大纲展示
+```
+
+自动修改链路中，Java 会把标题、故事摘要、剧情大纲、主要角色设定、现有分卷大纲和用户修改意见全部发送给 Python `/api/story/volume-outline/revise`。Python 使用 `prompt_VolumeOutline_Editor` 组织提示词，并通过 `with_structured_output(VolumeOutlineOutput)` 固定返回 `volumes` 数组，字段保持为 `volumeNumber`、`title`、`summary`、`content`、`endingHook`。Java 收到结果后整体替换当前 story 的分卷大纲，避免局部更新造成卷序错乱或残留旧数据。
+
+手动修改链路不经过 Python。`StoryDetailView` 会把当前 `volumeOutlines` 预填到弹窗，用户可以直接编辑卷号、卷名、摘要、详细大纲和卷末钩子，也可以新增或删除分卷。保存时前端调用 `PUT /api/story/{id}/volume-outline`，Java 后端校验后同样整体替换 `story_volume_outlines`，并返回最新 `StoryDetailResponse` 给前端刷新。
+
+## 分卷大纲两阶段生成
+
+分卷大纲生成从“一次性生成全部分卷”调整为“两阶段逐卷生成”。第一阶段由 Python FastAPI 使用温度为 0 的 `llm_temperature_0` 判断总分卷数，并通过 `with_structured_output(VolumeCountOutput)` 约束输出为 `volume_count`，范围为 5 到 20。第二阶段按卷号循环调用单卷生成提示词，每次只生成当前一卷。
+
+```mermaid
+sequenceDiagram
+    participant Java as Java StoryService
+    participant Python as FastAPI generate_volume_outline
+    participant CountLLM as 温度0结构化LLM
+    participant VolumeLLM as 单卷生成LLM
+
+    Java->>Python: POST /api/story/volume-outline
+    Python->>CountLLM: 故事总大纲 + 角色设定
+    CountLLM-->>Python: volume_count
+    loop 逐卷生成
+        Python->>VolumeLLM: 总大纲 + 当前卷号 + 已生成前序分卷
+        VolumeLLM-->>Python: 当前卷 VolumeOutlineItem
+        Python->>Python: 追加到 generated_volumes
+    end
+    Python-->>Java: volumes[]
+```
+
+逐卷生成时，提示词会同时携带故事总大纲、主要角色设定、总分卷数、当前卷号和已经生成的前序分卷大纲。这样后续分卷必须承接前序卷的卷末钩子、未解决危机、伏笔、人物关系变化和代价，避免一次性生成时常见的卷与卷之间断层、重复事件或战力跳级问题。

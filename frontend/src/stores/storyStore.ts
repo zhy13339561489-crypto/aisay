@@ -8,6 +8,8 @@ import type {
   StoryOutlineReviseRequest,
   StoryResponse,
   StoryUpdateRequest,
+  StoryVolumeOutlineReviseRequest,
+  StoryVolumeOutlineUpdateRequest,
 } from '../types/story';
 
 const DEFAULT_PAGE_SIZE = 10;
@@ -18,6 +20,8 @@ export const useStoryStore = defineStore('story', () => {
   const isLoading = ref(false);
   const isGenerating = ref(false);
   const isGeneratingVolumeOutline = ref(false);
+  const isRevisingVolumeOutline = ref(false);
+  const isSavingVolumeOutline = ref(false);
   const pagination = ref({
     current: 1,
     size: DEFAULT_PAGE_SIZE,
@@ -113,6 +117,30 @@ export const useStoryStore = defineStore('story', () => {
     }
   }
 
+  async function reviseVolumeOutline(id: number, data: StoryVolumeOutlineReviseRequest) {
+    isRevisingVolumeOutline.value = true;
+    try {
+      const story = await storyApi.reviseVolumeOutline(id, data);
+      currentStory.value = story;
+      upsertStory(story);
+      return story;
+    } finally {
+      isRevisingVolumeOutline.value = false;
+    }
+  }
+
+  async function updateVolumeOutlines(id: number, data: StoryVolumeOutlineUpdateRequest) {
+    isSavingVolumeOutline.value = true;
+    try {
+      const story = await storyApi.updateVolumeOutlines(id, data);
+      currentStory.value = story;
+      upsertStory(story);
+      return story;
+    } finally {
+      isSavingVolumeOutline.value = false;
+    }
+  }
+
   async function deleteStory(id: number) {
     await storyApi.deleteStory(id);
     stories.value = stories.value.filter((story) => story.id !== id);
@@ -136,6 +164,8 @@ export const useStoryStore = defineStore('story', () => {
     isLoading,
     isGenerating,
     isGeneratingVolumeOutline,
+    isRevisingVolumeOutline,
+    isSavingVolumeOutline,
     hasStories,
     fetchStories,
     fetchStoryDetail,
@@ -144,6 +174,8 @@ export const useStoryStore = defineStore('story', () => {
     updateStoryDetail,
     reviseStoryOutline,
     generateVolumeOutline,
+    reviseVolumeOutline,
+    updateVolumeOutlines,
     deleteStory,
   };
 });

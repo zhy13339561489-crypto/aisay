@@ -8,6 +8,8 @@ import type {
   StoryPageResponse,
   StoryResponse,
   StoryUpdateRequest,
+  StoryVolumeOutlineReviseRequest,
+  StoryVolumeOutlineUpdateRequest,
 } from '../types/story';
 
 function unwrap<T>(response: ApiResponse<T>): T {
@@ -51,6 +53,16 @@ export async function reviseStoryOutline(id: number, data: StoryOutlineReviseReq
 
 export async function generateVolumeOutline(id: number) {
   const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-outline/generate`);
+  return unwrap(response.data);
+}
+
+export async function reviseVolumeOutline(id: number, data: StoryVolumeOutlineReviseRequest) {
+  const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-outline/revise`, data);
+  return unwrap(response.data);
+}
+
+export async function updateVolumeOutlines(id: number, data: StoryVolumeOutlineUpdateRequest) {
+  const response = await request.put<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-outline`, data);
   return unwrap(response.data);
 }
 
