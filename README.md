@@ -10,6 +10,7 @@
 - **自然对话交互**：通过日常聊天形式收集创作需求，AI Agent 自动理解意图并调用对应能力
 - **渐进式生成**：多轮对话逐步细化角色、剧情、风格设定
 - **完整漫剧内容**：自动生成剧情大纲、分卷大纲、小节故事
+- **AI 资产生成**：自动识别人物/场景，调用豆包生成三视图设定图和环境概念图
 - **异步任务架构**：RabbitMQ 消息队列驱动非对话 AI 任务，支持逐卷/逐节增量回传
 - **模块化架构**：前后端分离，AI 引擎独立部署，易于扩展和维护
 - **响应式界面**：适配PC、平板、手机多端
@@ -23,6 +24,7 @@
 | **前端** | Vue 3 + TypeScript + Pinia + Vue Router + Axios + Element Plus |
 | **后端** | Java 17 + Spring Boot 3.2 + MyBatis-Plus + Spring Security |
 | **AI引擎** | Python + LangChain + FastAPI + Pydantic + 通义千问 (qwen-max) |
+| **图片生成** | 豆包 SeedDream 4.5 (doubao-seedream-4-5-251128) |
 | **数据库** | MySQL 8.0 + Redis 7 |
 | **消息队列** | RabbitMQ 3.12+ |
 | **文件存储** | 本地文件系统 (`./storage/`) |
@@ -34,19 +36,20 @@
 ┌─────────────┐    HTTP/WebSocket    ┌─────────────────┐    RabbitMQ     ┌─────────────────┐
 │   Vue 前端   │ ────────────────────► │ Spring Boot 后端 │ ──────────────► │  Python AI 引擎  │
 │  :8080      │ ◄──────────────────── │  :8085          │ ◄────────────── │  :5000          │
-└─────────────┘    轮询结果           └────────┬────────┘    结果回传     └─────────────────┘
-                                              │
-                              ┌───────────────┼───────────────┐
-                              │               │               │
-                      ┌───────▼───────┐ ┌─────▼───────┐ ┌─────▼───────┐
-                      │    MySQL     │ │    Redis    │ │   RabbitMQ  │
-                      │  :3306      │ │  :6379     │ │  :5672     │
-                      └──────────────┘ └────────────┘ └────────────┘
+└─────────────┘    轮询结果           └────────┬────────┘    结果回传     └────────┬────────┘
+                                              │                                  │
+                              ┌───────────────┼───────────────┐                  │
+                              │               │               │                  │
+                      ┌───────▼───────┐ ┌─────▼───────┐ ┌─────▼───────┐   ┌─────▼───────┐
+                      │    MySQL     │ │    Redis    │ │   RabbitMQ  │   │   豆包 API   │
+                      │  :3306      │ │  :6379     │ │  :5672     │   │  图片生成    │
+                      └──────────────┘ └────────────┘ └────────────┘   └─────────────┘
 ```
 
 **调用链路：**
 - **对话消息**：前端 → Java 后端 → Python Agent (HTTP) → Java 白名单分发 → 数据库
 - **故事生成**：前端 → Java 后端 → RabbitMQ → Python Worker → RabbitMQ → Java 监听落库 → 前端轮询
+- **图片生成**：Python Worker → 豆包 API → 本地存储 → Java 文件服务 → 前端展示
 
 ## 快速开始
 
@@ -76,10 +79,12 @@ mysql -u root -p < backend/src/main/resources/db/init.sql
 确保 `backend/src/main/resources/application.yml` 中的数据库连接信息与本地环境一致。
 
 4. **Python AI 配置**
-在 `python-ai/` 目录下创建 `api.yml`，填入通义千问 API Key：
+在 `python-ai/` 目录下创建 `api.yml`，填入通义千问和豆包 API Key：
 ```yaml
 tongyi:
-  api_key: "your-api-key-here"
+  api_key: "your-tongyi-api-key"
+doubao:
+  ARK_API_KEY: "your-doubao-api-key"
 ```
 
 ### 启动服务
@@ -146,7 +151,7 @@ aisay/
 │   ├── prompt.py                   # 所有提示词模板
 │   ├── rabbitmq_worker.py          # RabbitMQ 消费者，异步处理故事 AI 任务
 │   ├── requirements.txt            # Python 依赖
-│   └── api.yml                     # 通义千问 API Key (已 gitignore)
+│   └── api.yml                     # 通义千问 & 豆包 API Key (已 gitignore)
 │
 └── config.txt                      # 基础设施连接配置
 ```
@@ -165,9 +170,10 @@ aisay/
 - WebSocket 实时消息推送
 
 ### 3. 剧情大纲生成
-- 用户输入题材和可选剧情，AI 自动生成完整剧情大纲
+- 用户输入题材、可选剧情和漫剧风格，AI 自动生成完整剧情大纲
 - 大纲包含：故事摘要、主线剧情、主要角色设定
 - 支持大纲修改：用户输入修改意见，AI 自动重写
+- 漫剧风格贯穿后续所有图片和视频生成
 
 ### 4. 分卷大纲生成
 - 两阶段生成：先判断总分卷数，再逐卷生成详细大纲
@@ -179,8 +185,17 @@ aisay/
 - 将单卷大纲拆解为 4-12 个小节
 - 逐节生成具体故事细节，包含场景、动作、对话、冲突
 - 增量回传，前端逐步展示已生成的小节
+- 小节生成采用纯文本标签解析，避免长正文 JSON 转义失败
 
-### 6. 异步任务架构
+### 6. AI 资产生成
+- 每个小节可自动识别出现的人物和场景
+- 人物资产生成三视图设定图（正面、侧面、背面）
+- 场景资产生成环境概念图
+- 调用豆包 SeedDream 4.5 模型生成图片
+- 已识别的人物/场景自动复用，避免重复生成
+- 支持上传人物音频，为角色配音
+
+### 7. 异步任务架构
 - RabbitMQ 消息队列驱动所有非对话 AI 任务
 - Java 提交任务后立即返回，Python 后台异步处理
 - 支持 partial/completed 消息，实现增量结果回传
@@ -200,16 +215,21 @@ erDiagram
     stories ||--o{ characters : has
     stories ||--o{ story_volume_outlines : has
     story_volume_outlines ||--o{ story_volume_sections : has
+    stories ||--o{ story_assets : has
+    story_volume_sections ||--o{ story_section_assets : has
+    story_assets ||--o{ story_section_assets : has
 ```
 
 ### 核心表结构
 - **users**: 用户账户信息
 - **chat_sessions**: 聊天会话（绑定 story_id）
 - **messages**: 会话内的用户与 AI 消息
-- **stories**: 漫剧主记录（标题、摘要、大纲、状态）
+- **stories**: 漫剧主记录（标题、摘要、大纲、风格、状态）
 - **characters**: 主要角色设定
 - **story_volume_outlines**: 分卷大纲（一 story 多卷）
 - **story_volume_sections**: 分卷小节故事（一卷多节）
+- **story_assets**: 人物/场景资产（图片、音频、描述）
+- **story_section_assets**: 小节与资产的多对多关联
 
 ### 故事状态流转
 ```
@@ -217,6 +237,7 @@ draft → generating → draft (大纲生成完成)
 draft → revising → draft (大纲修改完成)
 draft → volume_pending → draft (分卷生成完成)
 draft → volume_section_pending → draft (小节生成完成)
+draft → section_asset_pending → draft (资产图片生成完成)
 任意状态 → failed (任务失败)
 ```
 
@@ -243,14 +264,16 @@ draft → volume_section_pending → draft (小节生成完成)
 - `POST /api/story/{id}/volume-outline/revise` - 自动修改分卷大纲（异步）
 - `PUT /api/story/{id}/volume-outline` - 手动修改分卷大纲
 - `POST /api/story/{id}/volume-outline/{volumeId}/sections/generate` - 生成小节故事（异步）
+- `POST /api/story/{id}/volume-sections/{sectionId}/assets/generate` - 生成小节资产图片（异步）
+- `POST /api/story/{id}/assets/{assetId}/audio` - 上传人物音频
 - `GET /api/story/{id}` - 获取漫剧详情
 - `GET /api/story/list` - 获取漫剧列表
 - `PUT /api/story/{id}` - 更新漫剧
 - `DELETE /api/story/{id}` - 删除漫剧
 
 ### 文件服务
-- `POST /api/files/upload` - 文件上传
-- `GET /api/files/{category}/{date}/{filename}` - 文件下载
+- `POST /api/files/upload` - 文件上传（需认证）
+- `GET /api/files/{path}` - 文件访问（公开，无需认证）
 
 详细API文档启动后访问：http://localhost:8085/doc.html
 
@@ -305,6 +328,14 @@ python main.py                    # 启动 FastAPI + RabbitMQ Worker
    - 查看 Python 控制台日志中的错误信息
    - 确认通义千问 API Key 有效且有余额
    - 确认 RabbitMQ 连接正常
+
+6. **图片无法显示**
+   - 确认 `/api/files/**` 已在 SecurityConfig 中放行（无需认证）
+   - 确认 `storage/generated-assets/` 目录存在且有写入权限
+   - 确认豆包 API Key 有效
+
+7. **小节生成返回 500**
+   - 确认已执行 `20260521_expand_stories_status_length.sql` 扩展 status 字段长度
 
 ## 项目进度
 
