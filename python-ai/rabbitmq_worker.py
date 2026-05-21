@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from story_ai import (
+    StorySectionAssetGenerateRequest,
     StoryOutlineGenerateRequest,
     StoryOutlineReviseRequest,
     StoryVolumeOutlineGenerateRequest,
@@ -15,6 +16,7 @@ from story_ai import (
     StoryVolumeSectionGenerateRequest,
     StoryVolumeStoryGenerateRequest,
     generate_story_outline,
+    generate_section_assets,
     generate_volume_outline,
     generate_volume_sections,
     generate_volume_story,
@@ -35,6 +37,7 @@ TASK_VOLUME_GENERATE = "VOLUME_GENERATE"
 TASK_VOLUME_REVISE = "VOLUME_REVISE"
 TASK_VOLUME_STORY_GENERATE = "VOLUME_STORY_GENERATE"
 TASK_VOLUME_SECTION_GENERATE = "VOLUME_SECTION_GENERATE"
+TASK_SECTION_ASSET_GENERATE = "SECTION_ASSET_GENERATE"
 
 _worker_thread: threading.Thread | None = None
 
@@ -145,6 +148,7 @@ def _handle_story_task(
                 StoryOutlineGenerateRequest(
                     userId=task.get("userId"),
                     genre=task.get("genre"),
+                    storyStyle=task.get("storyStyle"),
                     plot=task.get("plot"),
                 )
             )
@@ -210,6 +214,7 @@ def _handle_story_task(
                     storyId=task.get("storyId"),
                     volumeId=task.get("volumeId"),
                     title=task.get("title") or "",
+                    storyStyle=task.get("storyStyle"),
                     storySummary=task.get("storySummary"),
                     outline=task.get("outline") or "",
                     mainCharacters=task.get("mainCharacters") or [],
@@ -243,15 +248,44 @@ def _handle_story_task(
                     storyId=task.get("storyId"),
                     volumeId=task.get("volumeId"),
                     title=task.get("title") or "",
+                    storyStyle=task.get("storyStyle"),
                     storySummary=task.get("storySummary"),
                     outline=task.get("outline") or "",
                     mainCharacters=task.get("mainCharacters") or [],
                     volumeOutline=volume_outline,
+                    existingAssets=task.get("existingAssets") or [],
                 ),
                 on_section_generated=publish_section,
             )
             result["volumeId"] = task.get("volumeId")
             result["volumeNumber"] = volume_outline.get("volumeNumber")
+            result["completed"] = True
+        elif task_type == TASK_SECTION_ASSET_GENERATE:
+            volume_outline = (task.get("volumeOutlines") or [None])[0]
+            if not volume_outline:
+                raise ValueError("Volume outline is required for section asset generation")
+            section = task.get("section")
+            if not section:
+                raise ValueError("Section is required for section asset generation")
+
+            response = generate_section_assets(
+                StorySectionAssetGenerateRequest(
+                    userId=task.get("userId"),
+                    storyId=task.get("storyId"),
+                    volumeId=task.get("volumeId"),
+                    title=task.get("title") or "",
+                    storyStyle=task.get("storyStyle"),
+                    storySummary=task.get("storySummary"),
+                    outline=task.get("outline") or "",
+                    mainCharacters=task.get("mainCharacters") or [],
+                    volumeOutline=volume_outline,
+                    section=section,
+                    existingAssets=task.get("existingAssets") or [],
+                )
+            )
+            result["volumeId"] = task.get("volumeId")
+            result["volumeNumber"] = volume_outline.get("volumeNumber")
+            result["volumeSection"] = response.model_dump(by_alias=True)
             result["completed"] = True
         else:
             raise ValueError(f"Unsupported AI story task type: {task_type}")

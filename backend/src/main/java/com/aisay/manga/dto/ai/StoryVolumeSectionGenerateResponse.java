@@ -27,5 +27,29 @@ public class StoryVolumeSectionGenerateResponse {
         private String content;
 
         private String endingHook;
+
+        private List<SectionAssetItem> assets;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SectionAssetItem {
+
+        private String assetType;
+
+        private String name;
+
+        private String description;
+
+        private String imagePrompt;
+
+        private String imagePath;
+
+        private String audioPath;
+
+        private Boolean firstAppearance;
+
+        private String generationError;
     }
 }

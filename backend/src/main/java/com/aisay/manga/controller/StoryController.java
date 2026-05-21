@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 
 @RestController
 @RequestMapping("/api/story")
@@ -38,7 +39,7 @@ public class StoryController {
     }
 
     /**
-     * 作用：根据题材和可选剧情描述生成漫剧剧情大纲，并新建漫剧记录。
+     * 作用：根据题材、用户设定漫剧风格和可选剧情描述生成漫剧剧情大纲，并新建漫剧记录。
      * 调用方：前端“生成剧情大纲/生成漫剧”按钮请求 POST /api/story/generate。
      */
     @PostMapping("/generate")
@@ -104,6 +105,18 @@ public class StoryController {
     }
 
     /**
+     * 作用：根据某一小节的故事细节异步生成或复用本节人物/场景图片资产。
+     * 调用方：前端故事详情页每个小节卡片中的“生成人物/场景图片”按钮。
+     */
+    @PostMapping("/{id}/volume-sections/{sectionId}/assets/generate")
+    public ApiResponse<StoryDetailResponse> generateSectionAssets(
+            @PathVariable Long id,
+            @PathVariable Long sectionId
+    ) {
+        return ApiResponse.success("Section asset generation submitted", storyService.generateSectionAssets(id, sectionId, SecurityUtils.getCurrentUserId()));
+    }
+
+    /**
      * 作用：保存用户手动编辑后的分卷大纲列表。
      * 调用方：前端故事详情页“手动修改分卷大纲”弹窗请求 PUT /api/story/{id}/volume-outline。
      */
@@ -123,6 +136,19 @@ public class StoryController {
     public ApiResponse<StoryDetailResponse> getStoryDetail(@PathVariable Long id) {
         StoryDetailResponse storyDetailResponse = storyService.getStoryDetail(id, SecurityUtils.getCurrentUserId());
         return ApiResponse.success(storyDetailResponse);
+    }
+
+    /**
+     * 作用：为人物资产上传用户录制或准备好的音频。
+     * 调用方：前端故事详情页小节资产卡片中的“上传人物音频”入口。
+     */
+    @PostMapping("/{id}/assets/{assetId}/audio")
+    public ApiResponse<StoryDetailResponse> uploadCharacterAudio(
+            @PathVariable Long id,
+            @PathVariable Long assetId,
+            @RequestParam("file") MultipartFile file
+    ) {
+        return ApiResponse.success("Character audio uploaded", storyService.uploadCharacterAudio(id, assetId, SecurityUtils.getCurrentUserId(), file));
     }
 
     /**

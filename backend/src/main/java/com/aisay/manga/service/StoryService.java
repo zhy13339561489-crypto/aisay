@@ -9,6 +9,7 @@ import com.aisay.manga.dto.request.StoryVolumeOutlineUpdateRequest;
 import com.aisay.manga.dto.response.StoryDetailResponse;
 import com.aisay.manga.dto.response.StoryResponse;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import org.springframework.web.multipart.MultipartFile;
 
 public interface StoryService {
 
@@ -49,6 +50,12 @@ public interface StoryService {
     StoryDetailResponse generateVolumeSections(Long storyId, Long volumeId, Long userId);
 
     /**
+     * 作用：根据指定小节内容异步生成或复用本节人物/场景图片资产。
+     * 调用方：StoryController#generateSectionAssets。
+     */
+    StoryDetailResponse generateSectionAssets(Long storyId, Long sectionId, Long userId);
+
+    /**
      * 作用：手动保存用户编辑后的分卷大纲列表。
      * 调用方：StoryController#updateVolumeOutlines。
      */
@@ -59,6 +66,12 @@ public interface StoryService {
      * 调用方：StoryController#getStoryDetail。
      */
     StoryDetailResponse getStoryDetail(Long storyId, Long userId);
+
+    /**
+     * 作用：上传并绑定故事人物资产的音频文件。
+     * 调用方：StoryController#uploadCharacterAudio。
+     */
+    StoryDetailResponse uploadCharacterAudio(Long storyId, Long assetId, Long userId, MultipartFile file);
 
     /**
      * 作用：分页查询用户故事列表。

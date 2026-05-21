@@ -1043,3 +1043,66 @@ sequenceDiagram
 ```
 
 这个能力仍属于“非对话大模型调用”，因此不走 `AiEngineClient` 的同步 HTTP，而是沿用 RabbitMQ 异步任务链路。Python worker 每生成一节就发送 partial 消息，Java 监听后立即落库，前端通过详情页轮询逐步展示小节卡片。旧的 `detailed_content` 字段保留为兼容历史数据，新功能入口和页面展示都以 `story_volume_sections` 为准。
+
+### 小节人物/场景资产架构
+
+小节生成完成后，Python 会继续对当前小节做一次温度为 0 的结构化识别，输出本节实际出场的人物和场景。Java 在提交任务时会把当前故事已有 `story_assets` 作为 `existingAssets` 传给 Python；Python 以 `assetType + name` 判断是否首次出现。首次出现时调用豆包图片生成接口生成人物设定图或场景概念图，并保存到 Java 文件服务可读取的共享本地目录 `backend/storage/generated-assets`；非首次出现时直接复用已有图片路径和人物音频路径。
+
+当前资产生成入口已经从“小节生成流程”中拆出，改为每个小节卡片上的独立按钮。小节生成只负责产出故事细节；用户点击“生成人物/场景图片”后，Java 才发布 `SECTION_ASSET_GENERATE` 任务。这样可以避免每次生成文字小节时都触发昂贵的图片调用，也允许用户按需为某个小节补图或重跑资源识别。
+
+资产去重不依赖本地图片文件名。图片文件名通常是 UUID 或下载后的随机文件名，不能表达“这是哪个人物/场景”。系统以 `story_assets` 作为故事级资产索引，去重时把已有资产的类型、名称、描述、图片提示词、图片路径、音频路径传给通义模型。模型需要为当前小节识别出稳定的人物/场景名称，并在确认与已有资产是同一对象时返回 `matchedExistingName`。Python 优先按 `matchedExistingName` 复用已有资产；只有没有匹配到已有资产时才调用豆包文生图并创建新资产。如果已有资产记录存在但图片路径为空，则复用该资产记录并补调豆包生成图片。
+
+```mermaid
+sequenceDiagram
+    participant Java as Java StoryService
+    participant Python as Python story_ai
+    participant LLM as Tongyi temperature=0
+    participant Doubao as Doubao Image
+    participant FS as Local storage
+    participant DB as MySQL
+    participant View as StoryDetailView
+
+    View->>Java: POST /api/story/{id}/volume-sections/{sectionId}/assets/generate
+    Java->>Python: SECTION_ASSET_GENERATE + section + existingAssets
+    Python->>LLM: 从小节内容识别 characters/scenes
+    alt 首次出现
+        Python->>Doubao: images.generate(prompt)
+        Doubao-->>Python: image url
+        Python->>FS: 保存 generated-assets/date/file.png
+        Python-->>Java: asset firstAppearance=true + imagePath
+    else 已存在
+        Python-->>Java: asset firstAppearance=false + imagePath/audioPath
+    end
+    Java->>DB: upsert story_assets
+    Java->>DB: 写入 story_section_assets 关联
+    View->>Java: GET /api/story/{id}
+    Java-->>View: section.assets + imageUrl/audioUrl
+    View->>Java: POST /api/story/{id}/assets/{assetId}/audio
+    Java->>FS: 保存 character-audio/date/file
+    Java->>DB: 更新 story_assets.audio_path
+```
+
+数据职责如下：
+- `story_assets`：故事级资源库，保存人物/场景名称、描述、图片提示词、本地图片路径、人物音频路径和首次出现的小节。
+- `story_section_assets`：小节与资源的多对多关联表，表示某个小节出现了哪些人物和场景。
+- `backend/storage/generated-assets`：Python 调豆包生成后的图片落地目录，通过 Java `/api/files/...` 读取。
+- `backend/storage/character-audio`：用户上传的人物音频目录，由 Java 上传接口写入并绑定到人物资产。
+
+### 故事级漫剧风格
+
+`stories.style` 是当前故事的统一视觉风格来源。用户在“生成剧情大纲”时必须选择或输入漫剧风格，Java 会把该值保存到故事主记录；故事详情页也允许继续编辑这个字段。后续所有新生成的人物图片、场景图片和视频生成链路，都应读取同一个 `stories.style`，避免不同阶段生成出的画面风格漂移。
+
+风格传递链路如下：
+- 前端 `ChatView` 生成剧情大纲表单提交 `style`。
+- Java `StoryServiceImpl.generateStory` 保存 `stories.style`，并通过 `AiStoryTaskMessage.storyStyle` 传给 Python 剧情大纲任务。
+- Java `StoryServiceImpl.generateVolumeSections` 提交小节生成任务时再次传递 `storyStyle`。
+- Python `StoryVolumeSectionGenerateRequest.story_style` 进入人物/场景识别提示词，要求每个 `imagePrompt` 贴合该风格。
+- Python `build_doubao_prompt` 调用豆包图片生成前，把用户风格写入最终图片提示词，并要求画面适合后续分镜和视频生成。
+
+历史故事如果没有填写 `style`，Python 图片生成链路会使用“高质量国漫/漫剧视觉”作为兜底；更推荐用户在故事详情页先补齐风格，再生成新小节或新图片资产。未来接入视频生成时，不应单独新增一套风格来源，而应继续从 `stories.style` 读取同一份设定。
+
+### 图片访问与提示词分流
+
+图片文件本体保存在本地文件系统，数据库 `story_assets.image_path` 只保存相对路径，例如 `generated-assets/2026-05-21/xxx.png`。Java 在返回故事详情时会把它转换为 `imageUrl=/api/files/generated-assets/2026-05-21/xxx.png`；前端如果只拿到 `imagePath`，也会自动补成 `/api/files/...`。由于浏览器 `<img>` 请求不会携带 axios 的 Bearer Token，后端只对 `GET /api/files/**` 放行公开读取，上传和删除文件仍走原有鉴权链路。
+
+豆包图片提示词按资产类型分流。通义在 `prompt_SectionAssetExtraction` 中先判断资产是人物还是场景：人物、怪物、拟人角色等进入 `characters`，地点、房间、街区、建筑、战斗场地等进入 `scenes`。Python 根据 `assetType` 自动选择提示词：`CHARACTER` 使用人物三视图提示词，要求同一角色在一张图中展示正面、侧面、背面并保持服装、发型、配色一致；`SCENE` 使用场景概念图提示词，强调空间结构、光影氛围和可复用环境元素。

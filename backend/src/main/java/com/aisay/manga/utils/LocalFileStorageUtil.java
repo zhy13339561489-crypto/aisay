@@ -22,7 +22,10 @@ public class LocalFileStorageUtil {
 
     private static final Pattern DATE_SEGMENT = Pattern.compile("^\\d{4}-\\d{2}-\\d{2}$");
 
-    private static final Set<String> ALLOWED_EXTENSIONS = Set.of("jpg", "jpeg", "png", "gif", "bmp", "pdf", "epub");
+    private static final Set<String> ALLOWED_EXTENSIONS = Set.of(
+            "jpg", "jpeg", "png", "gif", "bmp", "pdf", "epub",
+            "mp3", "wav", "m4a", "aac", "ogg", "flac"
+    );
 
     private static final Set<String> ALLOWED_CONTENT_TYPES = Set.of(
             "image/jpeg",
@@ -31,6 +34,14 @@ public class LocalFileStorageUtil {
             "image/bmp",
             "application/pdf",
             "application/epub+zip",
+            "audio/mpeg",
+            "audio/wav",
+            "audio/x-wav",
+            "audio/mp4",
+            "audio/aac",
+            "audio/ogg",
+            "audio/flac",
+            "audio/x-m4a",
             "application/octet-stream"
     );
 
@@ -132,6 +143,8 @@ public class LocalFileStorageUtil {
             Files.createDirectories(rootPath.resolve("avatars"));
             Files.createDirectories(rootPath.resolve("resources"));
             Files.createDirectories(rootPath.resolve("covers"));
+            Files.createDirectories(rootPath.resolve("generated-assets"));
+            Files.createDirectories(rootPath.resolve("character-audio"));
         } catch (IOException e) {
             throw new UncheckedIOException("创建存储目录失败", e);
         }

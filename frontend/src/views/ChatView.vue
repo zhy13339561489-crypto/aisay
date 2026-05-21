@@ -134,6 +134,24 @@
             <el-option label="校园" value="校园" />
           </el-select>
         </el-form-item>
+        <el-form-item label="漫剧风格" prop="style">
+          <el-select
+            v-model="outlineForm.style"
+            filterable
+            allow-create
+            default-first-option
+            placeholder="请选择或输入统一视觉风格"
+          >
+            <el-option label="国漫电影感" value="国漫电影感" />
+            <el-option label="日系赛璐璐" value="日系赛璐璐" />
+            <el-option label="厚涂奇幻" value="厚涂奇幻" />
+            <el-option label="黑白悬疑漫画" value="黑白悬疑漫画" />
+            <el-option label="赛博朋克霓虹" value="赛博朋克霓虹" />
+            <el-option label="水彩治愈系" value="水彩治愈系" />
+            <el-option label="复古港漫" value="复古港漫" />
+          </el-select>
+          <p class="form-hint">该风格会作为后续图片生成和视频生成的统一视觉风格。</p>
+        </el-form-item>
         <el-form-item label="大致剧情（可选）" prop="plot">
           <el-input
             v-model="outlineForm.plot"
@@ -184,12 +202,17 @@ const createForm = reactive({
 });
 const outlineForm = reactive({
   genre: '',
+  style: '',
   plot: '',
 });
 const outlineRules: FormRules<typeof outlineForm> = {
   genre: [
     { required: true, message: '请选择或输入漫剧大纲题材', trigger: 'change' },
     { max: 100, message: '题材长度不能超过 100 个字符', trigger: 'change' },
+  ],
+  style: [
+    { required: true, message: '请选择或输入漫剧风格', trigger: 'change' },
+    { max: 100, message: '风格长度不能超过 100 个字符', trigger: 'change' },
   ],
   plot: [
     { max: 5000, message: '大致剧情长度不能超过 5000 个字符', trigger: 'blur' },
@@ -324,6 +347,7 @@ async function handleGenerateStory() {
 
 function openStoryOutlineDialog() {
   outlineForm.genre = '';
+  outlineForm.style = '';
   outlineForm.plot = '';
   outlineDialogVisible.value = true;
 }
@@ -341,6 +365,7 @@ async function submitStoryOutline() {
   await runSafely(async () => {
     const story = await storyStore.generateStory({
       genre: outlineForm.genre,
+      style: outlineForm.style,
       plot: outlineForm.plot || undefined,
     });
     outlineDialogVisible.value = false;
@@ -493,6 +518,13 @@ h1 {
   float: right;
   color: #94a3b8;
   font-size: 12px;
+}
+
+.form-hint {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 @media (max-width: 900px) {

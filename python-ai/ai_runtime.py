@@ -7,21 +7,26 @@ from langchain_community.chat_models import ChatTongyi
 from langchain_core.callbacks import BaseCallbackHandler
 
 
-def load_tongyi_api_key() -> str:
-    """作用：从 python-ai/api.yml 读取通义千问 API Key。
-    调用方：模块加载阶段初始化 tongyi_api_key，并写入 DASHSCOPE_API_KEY 环境变量。
+def load_api_config() -> dict:
+    """作用：从 python-ai/api.yml 读取大模型 API 配置。
+    调用方：模块加载阶段初始化通义和豆包配置。
     """
     api_config_path = Path(__file__).with_name("api.yml")
     if not api_config_path.exists():
-        return ""
+        return {}
 
-    config = yaml.safe_load(api_config_path.read_text(encoding="utf-8")) or {}
-    return str(config.get("tongyi", {}).get("api_key", "")).strip()
+    return yaml.safe_load(api_config_path.read_text(encoding="utf-8")) or {}
 
 
-tongyi_api_key = load_tongyi_api_key()
+api_config = load_api_config()
+tongyi_api_key = str(api_config.get("tongyi", {}).get("api_key", "")).strip()
+doubao_api_key = str(api_config.get("doubao", {}).get("ARK_API_KEY", "")).strip()
+
+
 if tongyi_api_key:
     os.environ["DASHSCOPE_API_KEY"] = tongyi_api_key
+if doubao_api_key:
+    os.environ["ARK_API_KEY"] = doubao_api_key
 
 
 llm_temperature_0 = ChatTongyi(
@@ -42,6 +47,22 @@ streaming_text_llm_base = ChatTongyi(
     temperature=0.8,
     streaming=True,
 )
+
+
+def get_doubao_image_client():
+    """作用：懒加载豆包图片客户端，避免未安装 openai 包时影响 FastAPI 启动。
+    调用方：story_ai.generate_doubao_image_file。
+    """
+    from openai import OpenAI
+
+    api_key = os.environ.get("ARK_API_KEY")
+    if not api_key:
+        raise RuntimeError("ARK_API_KEY is required for Doubao image generation")
+
+    return OpenAI(
+        base_url="https://ark.cn-beijing.volces.com/api/v3",
+        api_key=api_key,
+    )
 
 
 class ConsoleStreamingCallback(BaseCallbackHandler):

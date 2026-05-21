@@ -22,7 +22,9 @@ export const useStoryStore = defineStore('story', () => {
   const isGeneratingVolumeOutline = ref(false);
   const isRevisingVolumeOutline = ref(false);
   const generatingVolumeSectionsVolumeId = ref<number | null>(null);
+  const generatingSectionAssetsSectionId = ref<number | null>(null);
   const isSavingVolumeOutline = ref(false);
+  const uploadingAssetAudioId = ref<number | null>(null);
   const pagination = ref({
     current: 1,
     size: DEFAULT_PAGE_SIZE,
@@ -147,6 +149,30 @@ export const useStoryStore = defineStore('story', () => {
     }
   }
 
+  async function generateSectionAssets(id: number, sectionId: number) {
+    generatingSectionAssetsSectionId.value = sectionId;
+    try {
+      const story = await storyApi.generateSectionAssets(id, sectionId);
+      currentStory.value = story;
+      upsertStory(story);
+      return story;
+    } finally {
+      generatingSectionAssetsSectionId.value = null;
+    }
+  }
+
+  async function uploadCharacterAudio(id: number, assetId: number, file: File) {
+    uploadingAssetAudioId.value = assetId;
+    try {
+      const story = await storyApi.uploadCharacterAudio(id, assetId, file);
+      currentStory.value = story;
+      upsertStory(story);
+      return story;
+    } finally {
+      uploadingAssetAudioId.value = null;
+    }
+  }
+
   async function updateVolumeOutlines(id: number, data: StoryVolumeOutlineUpdateRequest) {
     isSavingVolumeOutline.value = true;
     try {
@@ -184,7 +210,9 @@ export const useStoryStore = defineStore('story', () => {
     isGeneratingVolumeOutline,
     isRevisingVolumeOutline,
     generatingVolumeSectionsVolumeId,
+    generatingSectionAssetsSectionId,
     isSavingVolumeOutline,
+    uploadingAssetAudioId,
     hasStories,
     fetchStories,
     fetchStoryDetail,
@@ -196,6 +224,8 @@ export const useStoryStore = defineStore('story', () => {
     generateVolumeOutline,
     reviseVolumeOutline,
     generateVolumeSections,
+    generateSectionAssets,
+    uploadCharacterAudio,
     updateVolumeOutlines,
     deleteStory,
   };

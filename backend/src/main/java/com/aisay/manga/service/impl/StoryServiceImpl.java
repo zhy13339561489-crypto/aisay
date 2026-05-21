@@ -3,6 +3,7 @@ package com.aisay.manga.service.impl;
 import com.aisay.manga.config.AiRabbitConstants;
 import com.aisay.manga.dto.ai.AiStoryTaskMessage;
 import com.aisay.manga.dto.ai.AiStoryTaskResultMessage;
+import com.aisay.manga.dto.ai.StoryAssetReference;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
 import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateResponse;
 import com.aisay.manga.dto.ai.StoryVolumeSectionGenerateResponse;
@@ -16,20 +17,26 @@ import com.aisay.manga.dto.response.StoryDetailResponse;
 import com.aisay.manga.dto.response.StoryResponse;
 import com.aisay.manga.entity.Character;
 import com.aisay.manga.entity.Story;
+import com.aisay.manga.entity.StoryAsset;
+import com.aisay.manga.entity.StorySectionAsset;
 import com.aisay.manga.entity.StoryVolumeOutline;
 import com.aisay.manga.entity.StoryVolumeSection;
 import com.aisay.manga.repository.CharacterMapper;
+import com.aisay.manga.repository.StoryAssetMapper;
 import com.aisay.manga.repository.StoryMapper;
+import com.aisay.manga.repository.StorySectionAssetMapper;
 import com.aisay.manga.repository.StoryVolumeOutlineMapper;
 import com.aisay.manga.repository.StoryVolumeSectionMapper;
 import com.aisay.manga.service.StoryService;
 import com.aisay.manga.utils.AiStoryTaskPublisher;
+import com.aisay.manga.utils.LocalFileStorageUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -53,9 +60,9 @@ public class StoryServiceImpl implements StoryService {
 
     private static final String STORY_STATUS_VOLUME_SECTION_PENDING = "volume_section_pending";
 
-    private static final String STORY_STATUS_FAILED = "failed";
+    private static final String STORY_STATUS_SECTION_ASSET_PENDING = "section_asset_pending";
 
-    private static final String OUTLINE_STYLE = "story_outline";
+    private static final String STORY_STATUS_FAILED = "failed";
 
     private final StoryMapper storyMapper;
 
@@ -64,6 +71,12 @@ public class StoryServiceImpl implements StoryService {
     private final StoryVolumeOutlineMapper storyVolumeOutlineMapper;
 
     private final StoryVolumeSectionMapper storyVolumeSectionMapper;
+
+    private final StoryAssetMapper storyAssetMapper;
+
+    private final StorySectionAssetMapper storySectionAssetMapper;
+
+    private final LocalFileStorageUtil localFileStorageUtil;
 
     private final AiStoryTaskPublisher aiStoryTaskPublisher;
 
@@ -76,17 +89,23 @@ public class StoryServiceImpl implements StoryService {
             CharacterMapper characterMapper,
             StoryVolumeOutlineMapper storyVolumeOutlineMapper,
             StoryVolumeSectionMapper storyVolumeSectionMapper,
+            StoryAssetMapper storyAssetMapper,
+            StorySectionAssetMapper storySectionAssetMapper,
+            LocalFileStorageUtil localFileStorageUtil,
             AiStoryTaskPublisher aiStoryTaskPublisher
     ) {
         this.storyMapper = storyMapper;
         this.characterMapper = characterMapper;
         this.storyVolumeOutlineMapper = storyVolumeOutlineMapper;
         this.storyVolumeSectionMapper = storyVolumeSectionMapper;
+        this.storyAssetMapper = storyAssetMapper;
+        this.storySectionAssetMapper = storySectionAssetMapper;
+        this.localFileStorageUtil = localFileStorageUtil;
         this.aiStoryTaskPublisher = aiStoryTaskPublisher;
     }
 
     /**
-     * 作用：新建一个“生成中”的故事占位记录，并把剧情大纲生成任务投递给 Python worker。
+     * 作用：新建一个“生成中”的故事占位记录，保存用户设定的漫剧风格，并把剧情大纲生成任务投递给 Python worker。
      * 调用方：StoryController#generateStory。
      */
     @Override
@@ -98,7 +117,7 @@ public class StoryServiceImpl implements StoryService {
         story.setUserId(userId);
         story.setTitle(resolveText(request.getGenre(), "新故事") + " 剧情大纲生成中");
         story.setGenre(request.getGenre());
-        story.setStyle(OUTLINE_STYLE);
+        story.setStyle(request.getStyle());
         story.setSynopsis(resolveText(request.getPlot(), "AI 正在根据题材生成剧情大纲，请稍后刷新。"));
         story.setFullContent(null);
         story.setStatus(STORY_STATUS_GENERATING);
@@ -110,6 +129,7 @@ public class StoryServiceImpl implements StoryService {
 
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_STORY_GENERATE, userId, story.getId());
         message.setGenre(request.getGenre());
+        message.setStoryStyle(story.getStyle());
         message.setPlot(request.getPlot());
         publishAfterCommit(message);
 
@@ -245,10 +265,44 @@ public class StoryServiceImpl implements StoryService {
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_SECTION_GENERATE, userId, storyId);
         message.setVolumeId(volumeId);
         message.setTitle(story.getTitle());
+        message.setStoryStyle(story.getStyle());
         message.setStorySummary(story.getSynopsis());
         message.setOutline(story.getFullContent());
         message.setMainCharacters(getMainCharacterSettings(storyId));
         message.setVolumeOutlines(List.of(toAiVolumeOutlineItem(volume)));
+        publishAfterCommit(message);
+
+        return getStoryDetail(storyId, userId);
+    }
+
+    /**
+     * 作用：把指定小节标记为资产生成任务，异步投递给 Python worker。
+     * 调用方：StoryController#generateSectionAssets。
+     */
+    @Override
+    @Transactional
+    public StoryDetailResponse generateSectionAssets(Long storyId, Long sectionId, Long userId) {
+        Story story = getOwnedStory(storyId, userId);
+        StoryVolumeSection section = getOwnedSection(storyId, sectionId);
+        if (section.getContent() == null || section.getContent().isBlank()) {
+            throw new IllegalArgumentException("Section content is required before generating section assets.");
+        }
+
+        StoryVolumeOutline volume = getOwnedVolume(storyId, section.getVolumeId());
+        story.setStatus(STORY_STATUS_SECTION_ASSET_PENDING);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+
+        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_SECTION_ASSET_GENERATE, userId, storyId);
+        message.setVolumeId(volume.getId());
+        message.setTitle(story.getTitle());
+        message.setStoryStyle(story.getStyle());
+        message.setStorySummary(story.getSynopsis());
+        message.setOutline(story.getFullContent());
+        message.setMainCharacters(getMainCharacterSettings(storyId));
+        message.setVolumeOutlines(List.of(toAiVolumeOutlineItem(volume)));
+        message.setSection(toAiVolumeSectionItem(section));
+        message.setExistingAssets(getStoryAssetReferences(storyId));
         publishAfterCommit(message);
 
         return getStoryDetail(storyId, userId);
@@ -300,6 +354,7 @@ public class StoryServiceImpl implements StoryService {
             case AiRabbitConstants.TASK_VOLUME_REVISE -> applyVolumeOutline(story, result.getVolumeOutline());
             case AiRabbitConstants.TASK_VOLUME_STORY_GENERATE -> applyVolumeStory(story, result);
             case AiRabbitConstants.TASK_VOLUME_SECTION_GENERATE -> applyGeneratedVolumeSectionResult(story, result);
+            case AiRabbitConstants.TASK_SECTION_ASSET_GENERATE -> applySectionAssetResult(story, result);
             default -> {
                 // Ignore unknown task types so one bad message does not block the listener.
             }
@@ -317,18 +372,40 @@ public class StoryServiceImpl implements StoryService {
                 .eq(Character::getStoryId, storyId)
                 .orderByAsc(Character::getId));
         List<StoryVolumeOutline> volumeOutlines = getVolumeOutlineEntities(storyId);
-        Map<Long, List<StoryVolumeSection>> sectionMap = getVolumeSectionEntities(storyId).stream()
+        List<StoryVolumeSection> sectionEntities = getVolumeSectionEntities(storyId);
+        Map<Long, List<StoryVolumeSection>> sectionMap = sectionEntities.stream()
                 .collect(Collectors.groupingBy(StoryVolumeSection::getVolumeId));
+        Map<Long, List<StoryAsset>> sectionAssetMap = getSectionAssetMap(storyId);
 
         StoryDetailResponse response = new StoryDetailResponse();
         fillStoryResponse(response, story);
         response.setFullContent(story.getFullContent());
         response.setVolumeOutlines(volumeOutlines.stream()
-                .map(volume -> toVolumeOutlineItem(volume, sectionMap.getOrDefault(volume.getId(), List.of())))
+                .map(volume -> toVolumeOutlineItem(volume, sectionMap.getOrDefault(volume.getId(), List.of()), sectionAssetMap))
                 .toList());
         response.setCharacters(characters.stream().map(this::toCharacterItem).toList());
         response.setScenes(List.of());
         return response;
+    }
+
+    /**
+     * 作用：把用户上传的人物音频保存到本地文件系统，并绑定到人物资产。
+     * 调用方：StoryController#uploadCharacterAudio。
+     */
+    @Override
+    @Transactional
+    public StoryDetailResponse uploadCharacterAudio(Long storyId, Long assetId, Long userId, MultipartFile file) {
+        getOwnedStory(storyId, userId);
+        StoryAsset asset = getOwnedStoryAsset(storyId, assetId);
+        if (!"CHARACTER".equalsIgnoreCase(asset.getAssetType())) {
+            throw new IllegalArgumentException("Only character assets can bind audio.");
+        }
+
+        String filePath = localFileStorageUtil.saveFile(file, "character-audio");
+        asset.setAudioPath(filePath);
+        asset.setUpdatedAt(LocalDateTime.now());
+        storyAssetMapper.updateById(asset);
+        return getStoryDetail(storyId, userId);
     }
 
     /**
@@ -533,6 +610,32 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.updateById(story);
     }
 
+    private void applySectionAssetResult(Story story, AiStoryTaskResultMessage result) {
+        StoryVolumeSectionGenerateResponse response = result.getVolumeSection();
+        if (response == null || response.getSections() == null || response.getSections().isEmpty()) {
+            markStoryFailed(story);
+            return;
+        }
+
+        StoryVolumeSectionGenerateResponse.VolumeSectionItem sectionItem = response.getSections().get(0);
+        StoryVolumeSection section = storyVolumeSectionMapper.selectOne(new LambdaQueryWrapper<StoryVolumeSection>()
+                .eq(StoryVolumeSection::getStoryId, story.getId())
+                .eq(StoryVolumeSection::getVolumeId, result.getVolumeId())
+                .eq(StoryVolumeSection::getSectionNumber, sectionItem.getSectionNumber())
+                .last("LIMIT 1"));
+        if (section == null) {
+            markStoryFailed(story);
+            return;
+        }
+
+        storySectionAssetMapper.delete(new LambdaQueryWrapper<StorySectionAsset>()
+                .eq(StorySectionAsset::getSectionId, section.getId()));
+        applySectionAssets(story.getId(), section.getId(), sectionItem.getAssets());
+        story.setStatus(STORY_STATUS_DRAFT);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+    }
+
     private List<StoryOutlineGenerateResponse.MainCharacterSetting> getMainCharacterSettings(Long storyId) {
         return characterMapper.selectList(new LambdaQueryWrapper<Character>()
                         .eq(Character::getStoryId, storyId)
@@ -639,13 +742,52 @@ public class StoryServiceImpl implements StoryService {
                 .orderByAsc(StoryVolumeSection::getId));
     }
 
-    private void replaceSingleVolumeSection(
+    private List<StoryAssetReference> getStoryAssetReferences(Long storyId) {
+        return storyAssetMapper.selectList(new LambdaQueryWrapper<StoryAsset>()
+                        .eq(StoryAsset::getStoryId, storyId)
+                        .orderByAsc(StoryAsset::getAssetType)
+                        .orderByAsc(StoryAsset::getName))
+                .stream()
+                .map(asset -> new StoryAssetReference(
+                        asset.getAssetType(),
+                        asset.getName(),
+                        asset.getDescription(),
+                        asset.getImagePrompt(),
+                        asset.getImagePath(),
+                        asset.getAudioPath()
+                ))
+                .toList();
+    }
+
+    private Map<Long, List<StoryAsset>> getSectionAssetMap(Long storyId) {
+        List<StorySectionAsset> links = storySectionAssetMapper.selectList(new LambdaQueryWrapper<StorySectionAsset>()
+                .eq(StorySectionAsset::getStoryId, storyId)
+                .orderByAsc(StorySectionAsset::getSectionId)
+                .orderByAsc(StorySectionAsset::getId));
+        if (links.isEmpty()) {
+            return Map.of();
+        }
+
+        Map<Long, StoryAsset> assetsById = storyAssetMapper.selectList(new LambdaQueryWrapper<StoryAsset>()
+                        .eq(StoryAsset::getStoryId, storyId))
+                .stream()
+                .collect(Collectors.toMap(StoryAsset::getId, asset -> asset));
+
+        return links.stream()
+                .filter(link -> assetsById.containsKey(link.getAssetId()))
+                .collect(Collectors.groupingBy(
+                        StorySectionAsset::getSectionId,
+                        Collectors.mapping(link -> assetsById.get(link.getAssetId()), Collectors.toList())
+                ));
+    }
+
+    private StoryVolumeSection replaceSingleVolumeSection(
             Long storyId,
             Long volumeId,
             StoryVolumeSectionGenerateResponse.VolumeSectionItem item
     ) {
         if (item == null) {
-            return;
+            throw new IllegalArgumentException("Volume section item is required.");
         }
 
         Integer sectionNumber = item.getSectionNumber();
@@ -672,6 +814,85 @@ public class StoryServiceImpl implements StoryService {
         section.setCreatedAt(now);
         section.setUpdatedAt(now);
         storyVolumeSectionMapper.insert(section);
+        return section;
+    }
+
+    private void applySectionAssets(
+            Long storyId,
+            Long sectionId,
+            List<StoryVolumeSectionGenerateResponse.SectionAssetItem> assets
+    ) {
+        if (assets == null || assets.isEmpty()) {
+            return;
+        }
+
+        assets.stream()
+                .filter(asset -> asset.getName() != null && !asset.getName().isBlank())
+                .forEach(asset -> {
+                    StoryAsset storyAsset = findOrCreateStoryAsset(storyId, sectionId, asset);
+                    linkSectionAsset(storyId, sectionId, storyAsset.getId());
+                });
+    }
+
+    private StoryAsset findOrCreateStoryAsset(
+            Long storyId,
+            Long sectionId,
+            StoryVolumeSectionGenerateResponse.SectionAssetItem item
+    ) {
+        String assetType = resolveText(item.getAssetType(), "SCENE").toUpperCase();
+        StoryAsset existing = storyAssetMapper.selectOne(new LambdaQueryWrapper<StoryAsset>()
+                .eq(StoryAsset::getStoryId, storyId)
+                .eq(StoryAsset::getAssetType, assetType)
+                .eq(StoryAsset::getName, item.getName())
+                .last("LIMIT 1"));
+        LocalDateTime now = LocalDateTime.now();
+        if (existing != null) {
+            if (existing.getDescription() == null || existing.getDescription().isBlank()) {
+                existing.setDescription(item.getDescription());
+            }
+            if (existing.getImagePrompt() == null || existing.getImagePrompt().isBlank()) {
+                existing.setImagePrompt(item.getImagePrompt());
+            }
+            if ((existing.getImagePath() == null || existing.getImagePath().isBlank()) && item.getImagePath() != null) {
+                existing.setImagePath(item.getImagePath());
+            }
+            if (existing.getFirstSectionId() == null && Boolean.TRUE.equals(item.getFirstAppearance())) {
+                existing.setFirstSectionId(sectionId);
+            }
+            existing.setUpdatedAt(now);
+            storyAssetMapper.updateById(existing);
+            return existing;
+        }
+
+        StoryAsset asset = new StoryAsset();
+        asset.setStoryId(storyId);
+        asset.setAssetType(assetType);
+        asset.setName(item.getName());
+        asset.setDescription(item.getDescription());
+        asset.setImagePrompt(item.getImagePrompt());
+        asset.setImagePath(item.getImagePath());
+        asset.setAudioPath(item.getAudioPath());
+        asset.setFirstSectionId(Boolean.TRUE.equals(item.getFirstAppearance()) ? sectionId : null);
+        asset.setCreatedAt(now);
+        asset.setUpdatedAt(now);
+        storyAssetMapper.insert(asset);
+        return asset;
+    }
+
+    private void linkSectionAsset(Long storyId, Long sectionId, Long assetId) {
+        Long existingCount = storySectionAssetMapper.selectCount(new LambdaQueryWrapper<StorySectionAsset>()
+                .eq(StorySectionAsset::getSectionId, sectionId)
+                .eq(StorySectionAsset::getAssetId, assetId));
+        if (existingCount != null && existingCount > 0) {
+            return;
+        }
+
+        StorySectionAsset link = new StorySectionAsset();
+        link.setStoryId(storyId);
+        link.setSectionId(sectionId);
+        link.setAssetId(assetId);
+        link.setCreatedAt(LocalDateTime.now());
+        storySectionAssetMapper.insert(link);
     }
 
     private Story getOwnedStory(Long storyId, Long userId) {
@@ -691,6 +912,22 @@ public class StoryServiceImpl implements StoryService {
             throw new NoSuchElementException("Volume outline not found");
         }
         return volume;
+    }
+
+    private StoryVolumeSection getOwnedSection(Long storyId, Long sectionId) {
+        StoryVolumeSection section = storyVolumeSectionMapper.selectById(sectionId);
+        if (section == null || !storyId.equals(section.getStoryId())) {
+            throw new NoSuchElementException("Volume section not found");
+        }
+        return section;
+    }
+
+    private StoryAsset getOwnedStoryAsset(Long storyId, Long assetId) {
+        StoryAsset asset = storyAssetMapper.selectById(assetId);
+        if (asset == null || !storyId.equals(asset.getStoryId())) {
+            throw new NoSuchElementException("Story asset not found");
+        }
+        return asset;
     }
 
     private StoryResponse toStoryResponse(Story story) {
@@ -758,9 +995,21 @@ public class StoryServiceImpl implements StoryService {
         );
     }
 
+    private StoryVolumeSectionGenerateResponse.VolumeSectionItem toAiVolumeSectionItem(StoryVolumeSection section) {
+        return new StoryVolumeSectionGenerateResponse.VolumeSectionItem(
+                section.getSectionNumber(),
+                section.getTitle(),
+                section.getSummary(),
+                section.getContent(),
+                section.getEndingHook(),
+                List.of()
+        );
+    }
+
     private StoryDetailResponse.VolumeOutlineItem toVolumeOutlineItem(
             StoryVolumeOutline volume,
-            List<StoryVolumeSection> sections
+            List<StoryVolumeSection> sections,
+            Map<Long, List<StoryAsset>> sectionAssetMap
     ) {
         return new StoryDetailResponse.VolumeOutlineItem(
                 volume.getId(),
@@ -770,18 +1019,43 @@ public class StoryServiceImpl implements StoryService {
                 volume.getContent(),
                 volume.getEndingHook(),
                 volume.getDetailedContent(),
-                sections.stream().map(this::toVolumeSectionItem).toList()
+                sections.stream()
+                        .map(section -> toVolumeSectionItem(section, sectionAssetMap.getOrDefault(section.getId(), List.of())))
+                        .toList()
         );
     }
 
-    private StoryDetailResponse.VolumeSectionItem toVolumeSectionItem(StoryVolumeSection section) {
+    private StoryDetailResponse.VolumeSectionItem toVolumeSectionItem(StoryVolumeSection section, List<StoryAsset> assets) {
         return new StoryDetailResponse.VolumeSectionItem(
                 section.getId(),
                 section.getSectionNumber(),
                 section.getTitle(),
                 section.getSummary(),
                 section.getContent(),
-                section.getEndingHook()
+                section.getEndingHook(),
+                assets.stream().map(this::toStoryAssetItem).toList()
         );
+    }
+
+    private StoryDetailResponse.StoryAssetItem toStoryAssetItem(StoryAsset asset) {
+        return new StoryDetailResponse.StoryAssetItem(
+                asset.getId(),
+                asset.getAssetType(),
+                asset.getName(),
+                asset.getDescription(),
+                asset.getImagePrompt(),
+                asset.getImagePath(),
+                toFileUrl(asset.getImagePath()),
+                asset.getAudioPath(),
+                toFileUrl(asset.getAudioPath()),
+                asset.getFirstSectionId()
+        );
+    }
+
+    private String toFileUrl(String filePath) {
+        if (filePath == null || filePath.isBlank()) {
+            return null;
+        }
+        return localFileStorageUtil.getFileUrl(filePath);
     }
 }

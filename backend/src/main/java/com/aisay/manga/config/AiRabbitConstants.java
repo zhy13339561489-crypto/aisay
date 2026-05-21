@@ -24,6 +24,8 @@ public final class AiRabbitConstants {
 
     public static final String TASK_VOLUME_SECTION_GENERATE = "VOLUME_SECTION_GENERATE";
 
+    public static final String TASK_SECTION_ASSET_GENERATE = "SECTION_ASSET_GENERATE";
+
     private AiRabbitConstants() {
     }
 }

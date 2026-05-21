@@ -63,7 +63,7 @@ public class FileController {
         String filePath = fileStorageUtil.buildRelativePath(category, date, filename);
         Resource resource = fileStorageUtil.loadFile(filePath);
         return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+                .contentType(resolveMediaType(filename))
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"" + resource.getFilename() + "\"")
                 .body(resource);
     }
@@ -81,5 +81,34 @@ public class FileController {
         String filePath = fileStorageUtil.buildRelativePath(category, date, filename);
         fileStorageUtil.deleteFile(filePath);
         return ApiResponse.success("文件删除成功", null);
+    }
+
+    private MediaType resolveMediaType(String filename) {
+        String lowerName = filename == null ? "" : filename.toLowerCase();
+        if (lowerName.endsWith(".jpg") || lowerName.endsWith(".jpeg")) {
+            return MediaType.IMAGE_JPEG;
+        }
+        if (lowerName.endsWith(".png")) {
+            return MediaType.IMAGE_PNG;
+        }
+        if (lowerName.endsWith(".gif")) {
+            return MediaType.IMAGE_GIF;
+        }
+        if (lowerName.endsWith(".mp3")) {
+            return MediaType.parseMediaType("audio/mpeg");
+        }
+        if (lowerName.endsWith(".wav")) {
+            return MediaType.parseMediaType("audio/wav");
+        }
+        if (lowerName.endsWith(".m4a")) {
+            return MediaType.parseMediaType("audio/mp4");
+        }
+        if (lowerName.endsWith(".ogg")) {
+            return MediaType.parseMediaType("audio/ogg");
+        }
+        if (lowerName.endsWith(".flac")) {
+            return MediaType.parseMediaType("audio/flac");
+        }
+        return MediaType.APPLICATION_OCTET_STREAM;
     }
 }

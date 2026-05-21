@@ -93,5 +93,33 @@ public class StoryDetailResponse extends StoryResponse {
         private String content;
 
         private String endingHook;
+
+        private List<StoryAssetItem> assets;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class StoryAssetItem {
+
+        private Long id;
+
+        private String assetType;
+
+        private String name;
+
+        private String description;
+
+        private String imagePrompt;
+
+        private String imagePath;
+
+        private String imageUrl;
+
+        private String audioPath;
+
+        private String audioUrl;
+
+        private Long firstSectionId;
     }
 }

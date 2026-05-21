@@ -27,6 +27,8 @@ public class AiStoryTaskMessage {
 
     private String title;
 
+    private String storyStyle;
+
     private String storySummary;
 
     private String outline;
@@ -34,6 +36,10 @@ public class AiStoryTaskMessage {
     private List<StoryOutlineGenerateResponse.MainCharacterSetting> mainCharacters;
 
     private List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumeOutlines;
+
+    private StoryVolumeSectionGenerateResponse.VolumeSectionItem section;
+
+    private List<StoryAssetReference> existingAssets;
 
     private String suggestion;
 }

@@ -140,10 +140,60 @@
                 <div class="volume-title-row">
                   <el-tag type="primary" effect="light">第 {{ section.sectionNumber }} 节</el-tag>
                   <h4>{{ section.title }}</h4>
+                  <el-button
+                    type="warning"
+                    plain
+                    size="small"
+                    :loading="storyStore.generatingSectionAssetsSectionId === section.id"
+                    @click="generateSectionAssets(section.id)"
+                  >
+                    {{ section.assets?.length ? '重新生成人物/场景图片' : '生成人物/场景图片' }}
+                  </el-button>
                 </div>
                 <p v-if="section.summary" class="volume-summary">{{ section.summary }}</p>
                 <p v-if="section.content" class="script-text">{{ section.content }}</p>
                 <p v-if="section.endingHook" class="ending-hook">小节钩子：{{ section.endingHook }}</p>
+                <div v-if="section.assets?.length" class="section-assets">
+                  <h5>本节人物与场景资源</h5>
+                  <div class="asset-grid">
+                    <article
+                      v-for="asset in section.assets"
+                      :key="asset.id"
+                      class="asset-card"
+                    >
+                      <div class="asset-image">
+                        <img v-if="resolveAssetImageUrl(asset)" :src="resolveAssetImageUrl(asset)" :alt="asset.name" />
+                        <span v-else>图片生成中或生成失败</span>
+                      </div>
+                      <div class="asset-body">
+                        <el-tag size="small" :type="asset.assetType === 'CHARACTER' ? 'success' : 'warning'">
+                          {{ assetTypeLabel(asset.assetType) }}
+                        </el-tag>
+                        <h6>{{ asset.name }}</h6>
+                        <p v-if="asset.description">{{ asset.description }}</p>
+                        <audio
+                          v-if="asset.assetType === 'CHARACTER' && asset.audioUrl"
+                          controls
+                          :src="asset.audioUrl"
+                        />
+                        <el-upload
+                          v-if="asset.assetType === 'CHARACTER'"
+                          :show-file-list="false"
+                          :before-upload="beforeAssetAudioUpload"
+                          :http-request="createAssetAudioUploader(asset.id)"
+                        >
+                          <el-button
+                            size="small"
+                            plain
+                            :loading="storyStore.uploadingAssetAudioId === asset.id"
+                          >
+                            {{ asset.audioUrl ? '替换人物音频' : '上传人物音频' }}
+                          </el-button>
+                        </el-upload>
+                      </div>
+                    </article>
+                  </div>
+                </div>
               </article>
             </div>
           </article>
@@ -164,8 +214,9 @@
         <el-form-item label="类型">
           <el-input v-model.trim="editForm.genre" maxlength="100" />
         </el-form-item>
-        <el-form-item label="风格">
+        <el-form-item label="漫剧风格">
           <el-input v-model.trim="editForm.style" maxlength="100" />
+          <p class="field-hint">修改后，新生成的人物、场景图片以及后续视频生成都会使用这个统一风格。</p>
         </el-form-item>
         <el-form-item label="摘要">
           <el-input
@@ -356,10 +407,11 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
+import type { UploadRawFile, UploadRequestOptions } from 'element-plus';
 import { useRouter } from 'vue-router';
 import CharacterCard from '../components/story/CharacterCard.vue';
 import { useStoryStore } from '../stores/storyStore';
-import type { StoryCharacter, StoryVolumeOutlineUpdateItem } from '../types/story';
+import type { StoryAsset, StoryCharacter, StoryVolumeOutlineUpdateItem } from '../types/story';
 
 interface EditableCharacter {
   name: string;
@@ -619,6 +671,57 @@ async function generateVolumeSections(volumeId: number) {
   startStoryPolling(story.value.id);
 }
 
+async function generateSectionAssets(sectionId: number) {
+  if (!story.value) {
+    return;
+  }
+
+  await storyStore.generateSectionAssets(story.value.id, sectionId);
+  ElMessage.success('小节人物/场景图片生成任务已提交');
+  startStoryPolling(story.value.id);
+}
+
+function assetTypeLabel(assetType?: string) {
+  if (assetType === 'CHARACTER') {
+    return '人物';
+  }
+  if (assetType === 'SCENE') {
+    return '场景';
+  }
+  return assetType || '资源';
+}
+
+function resolveAssetImageUrl(asset: StoryAsset) {
+  if (asset.imageUrl) {
+    return asset.imageUrl;
+  }
+  if (!asset.imagePath) {
+    return '';
+  }
+  return asset.imagePath.startsWith('/api') ? asset.imagePath : `/api/files/${asset.imagePath.replace(/^\/+/, '')}`;
+}
+
+function beforeAssetAudioUpload(file: UploadRawFile) {
+  if (!file.type.startsWith('audio/')) {
+    ElMessage.error('请上传音频文件');
+    return false;
+  }
+  return true;
+}
+
+async function uploadAssetAudio(assetId: number, options: UploadRequestOptions) {
+  if (!story.value) {
+    return;
+  }
+
+  await storyStore.uploadCharacterAudio(story.value.id, assetId, options.file);
+  ElMessage.success('人物音频已保存');
+}
+
+function createAssetAudioUploader(assetId: number) {
+  return (options: UploadRequestOptions) => uploadAssetAudio(assetId, options);
+}
+
 function openVolumeReviseDialog() {
   if (!hasVolumeOutlines.value) {
     ElMessage.warning('请先生成分卷大纲');
@@ -742,6 +845,9 @@ function statusLabel(status?: string) {
   if (status === 'volume_section_pending') {
     return '分卷小节生成中';
   }
+  if (status === 'section_asset_pending') {
+    return '小节图片生成中';
+  }
   if (status === 'failed') {
     return '生成失败';
   }
@@ -778,7 +884,7 @@ function stopStoryPolling() {
 }
 
 function isProcessingStatus(status?: string) {
-  return status === 'generating' || status === 'revising' || status === 'volume_pending' || status === 'volume_story_pending' || status === 'volume_section_pending';
+  return status === 'generating' || status === 'revising' || status === 'volume_pending' || status === 'volume_story_pending' || status === 'volume_section_pending' || status === 'section_asset_pending';
 }
 
 function syncSelectedVolume() {
@@ -941,6 +1047,66 @@ h3 {
   background: rgba(240, 249, 255, 0.72);
 }
 
+.section-assets {
+  margin-top: 16px;
+}
+
+.section-assets h5 {
+  margin: 0 0 10px;
+  color: #0f172a;
+}
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+}
+
+.asset-card {
+  overflow: hidden;
+  border: 1px solid rgba(15, 118, 110, 0.16);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.asset-image {
+  display: grid;
+  min-height: 140px;
+  place-items: center;
+  background: linear-gradient(135deg, rgba(204, 251, 241, 0.72), rgba(219, 234, 254, 0.72));
+  color: #64748b;
+  font-size: 13px;
+}
+
+.asset-image img {
+  width: 100%;
+  height: 180px;
+  object-fit: cover;
+  display: block;
+}
+
+.asset-body {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.asset-body h6 {
+  margin: 0;
+  font-size: 15px;
+  color: #0f172a;
+}
+
+.asset-body p {
+  margin: 0;
+  color: #475569;
+  line-height: 1.6;
+}
+
+.asset-body audio {
+  width: 100%;
+}
+
 .volume-title-row {
   display: flex;
   align-items: center;
@@ -958,6 +1124,13 @@ h3 {
 
 .ending-hook {
   color: #b45309;
+}
+
+.field-hint {
+  margin: 8px 0 0;
+  color: #64748b;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 @media (max-width: 900px) {

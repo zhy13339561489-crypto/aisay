@@ -15,6 +15,10 @@ public class StoryGenerateRequest {
     @Size(max = 100, message = "题材长度不能超过100个字符")
     private String genre;
 
+    @NotBlank(message = "漫剧风格不能为空")
+    @Size(max = 100, message = "风格长度不能超过100个字符")
+    private String style;
+
     @Size(max = 5000, message = "大致剧情长度不能超过5000个字符")
     private String plot;
 }

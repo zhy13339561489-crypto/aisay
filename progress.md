@@ -1364,3 +1364,139 @@
 需要你做的事情：
 - [ ] 重启 Python FastAPI，让新的小节生成提示词和普通文本解析逻辑生效。
 - [ ] 重新点击对应分卷的“生成小节故事”；之前失败的 RabbitMQ 任务不会自动续跑，需要重新提交一次。
+
+## 2026-05-21 小节人物/场景资产生成与人物音频上传
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260521_create_story_assets.sql`，创建 `story_assets` 和 `story_section_assets`。
+- [x] `story_assets` 保存故事级人物/场景资产，包括类型、名称、描述、图片提示词、本地图片路径、本地人物音频路径和首次出现的小节。
+- [x] `story_section_assets` 保存小节与资产的多对多关系，用于同一人物/场景在多个小节复用。
+- [x] 同步更新 `backend/src/main/resources/db/init.sql`，新环境初始化时会创建资产表。
+
+### Python
+- [x] 新增 `prompt_SectionAssetExtraction`，每个小节生成后使用温度为 0 的 `with_structured_output()` 识别本节实际出现的人物和场景。
+- [x] Python 会接收 Java 传来的 `existingAssets`，按 `assetType + name` 判断是否首次出现。
+- [x] 首次出现的人物/场景会调用豆包图片接口 `doubao-seedream-4-5-251128` 生成图片，并保存到 Java 文件服务可读取的 `backend/storage/generated-assets/<date>/`。
+- [x] 非首次出现的人物/场景直接复用已有图片路径和人物音频路径。
+- [x] `api.yml` 中的 `doubao.ARK_API_KEY` 会写入环境变量，豆包客户端改为懒加载，避免未安装 `openai` 时影响 FastAPI 启动。
+- [x] `requirements.txt` 新增 `openai>=1.30.0`。
+
+### 后端
+- [x] 新增 `StoryAsset`、`StorySectionAsset` 实体和 Mapper。
+- [x] `AiStoryTaskMessage` 新增 `existingAssets`，提交小节生成任务时把当前故事已有资产传给 Python。
+- [x] `StoryVolumeSectionGenerateResponse.VolumeSectionItem` 新增 `assets`，Java 收到 partial 小节结果后会落库资产并建立小节关联。
+- [x] 故事详情接口返回每个小节的 `assets`，包含图片 URL 和人物音频 URL。
+- [x] 新增 `POST /api/story/{id}/assets/{assetId}/audio`，用于上传并绑定人物音频。
+- [x] 本地文件上传白名单新增常见音频格式，并新增 `generated-assets`、`character-audio` 存储目录。
+
+### 前端
+- [x] 小节卡片下方展示“本节人物与场景资源”，显示人物/场景图片、描述和人物音频。
+- [x] 人物资产支持上传或替换音频，上传后刷新当前故事详情。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] Python 导入和资产注册表解析检查成功。
+- [x] 前端构建成功：`npm run build`。
+- [x] 前端构建仍有 Sass legacy JS API、Rollup 注释和大 chunk 警告，属于既有非阻断警告。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260521_create_story_assets.sql`。
+- [ ] 在 `python-ai` 目录执行 `pip install -r requirements.txt`，安装新增的 `openai` 依赖。
+- [ ] 重启 Python FastAPI，让豆包图片生成、资产识别提示词和新模型生效。
+- [ ] 重启 Java 后端，让新增资产表映射、音频上传接口和详情返回字段生效。
+- [ ] 重新点击“生成小节故事”；首次出现的人物/场景会生成图片，已出现的会复用本地图片和人物音频。
+- [ ] 为人物资产上传音频时，请在故事详情页对应人物资源卡片点击“上传人物音频”。
+
+## 2026-05-21 漫剧风格设定与视觉风格传递
+### 前端
+- [x] “生成剧情大纲”弹窗新增必填项“漫剧风格”，支持选择预设风格或手动输入自定义风格。
+- [x] 提交剧情大纲生成时，前端会把 `style` 和题材、剧情一起传给 Java 后端。
+- [x] 故事详情页“编辑漫剧信息”中的风格字段说明已补充：后续新生成的人物、场景图片和视频生成都会使用这个统一风格。
+
+### 后端
+- [x] `StoryGenerateRequest` 新增必填 `style`，最大长度 100。
+- [x] 新建故事时不再写固定风格，而是把用户输入的风格保存到 `stories.style`。
+- [x] `AiStoryTaskMessage` 新增 `storyStyle`，剧情大纲生成任务和小节生成任务都会携带故事级风格。
+- [x] 小节生成任务提交时，Java 会把 `stories.style` 传给 Python，确保图片资产生成有统一视觉风格来源。
+
+### Python
+- [x] `StoryOutlineGenerateRequest` 接收 `storyStyle`，剧情大纲提示词会感知用户设定的漫剧视觉风格。
+- [x] `StoryVolumeSectionGenerateRequest` 接收 `storyStyle`。
+- [x] 人物/场景识别提示词要求 `imagePrompt` 严格贴合用户设定的漫剧风格。
+- [x] 豆包图片生成提示词会明确写入用户设定风格，并要求最终画面适合后续分镜和视频生成。
+- [x] 如果历史故事没有风格，Python 会使用“高质量国漫/漫剧视觉”作为兜底风格。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] Python 导入、`storyStyle` 请求模型实例化和提示词格式化检查成功，豆包提示词中能包含用户风格。
+- [x] 前端构建成功：`npm run build`。
+- [x] 浏览器轻量检查能访问 `http://localhost:8080/chat`，当前未登录时正常跳转到登录页。
+- [x] `git diff --check` 无空白错误，仅保留既有 LF/CRLF 换行提示。
+- [x] 前端构建仍有 Sass legacy JS API、Rollup 注释和大 chunk 警告，属于既有非阻断警告。
+
+### 需要你做的事情
+- [ ] 本次“漫剧风格”改动不需要新增 SQL；`stories.style` 字段已存在。
+- [ ] 重启 Java 后端，让新增 `style` 入参校验和 RabbitMQ `storyStyle` 字段生效。
+- [ ] 重启 Python FastAPI，让新的 `storyStyle` 请求字段和图片提示词生效。
+- [ ] 刷新前端页面后，点击“生成剧情大纲”，选择或输入“漫剧风格”再提交。
+- [ ] 对历史已存在且风格为空的故事，请在故事详情页“编辑信息”里补上风格；否则后续图片生成会使用默认兜底风格。
+
+## 2026-05-21 小节人物/场景图片改为按小节按钮生成
+### 设计调整
+- [x] 将人物/场景图片资产生成从“分卷小节生成”流程里拆出来，小节生成现在只负责产出文字小节。
+- [x] 每个小节卡片新增“生成人物/场景图片”按钮，用户点击后才执行本节资产识别、复用和补图。
+- [x] 新增故事状态 `section_asset_pending`，前端详情页会轮询等待图片资产生成结果。
+
+### 后端
+- [x] 新增 RabbitMQ 任务类型 `SECTION_ASSET_GENERATE`。
+- [x] 新增接口 `POST /api/story/{id}/volume-sections/{sectionId}/assets/generate`。
+- [x] 新增 `StoryService.generateSectionAssets`，会读取小节内容、分卷大纲、故事风格、角色设定和已有资产列表，并投递异步任务。
+- [x] Java 收到小节资产生成结果后，会清理当前小节旧的资产关联，再根据结果复用或写入 `story_assets`，并重建 `story_section_assets` 关联。
+- [x] 本次改动不新增 SQL，继续使用已有 `story_assets` 和 `story_section_assets` 表。
+
+### Python
+- [x] 新增 `StorySectionAssetGenerateRequest` 和 `/api/story/section-assets` 调试接口。
+- [x] RabbitMQ worker 支持消费 `SECTION_ASSET_GENERATE`。
+- [x] 通义识别当前小节人物/场景时，会综合已有资产的类型、名称、描述和图片提示词判断是否同一对象。
+- [x] 识别结果新增 `matchedExistingName`：确认与已有资产相同才填写已有资产原始名称，否则置空。
+- [x] Python 优先按 `matchedExistingName` 复用已有资产，不依赖图片文件名；没有匹配或已有资产没有图片路径时，才调用豆包生成图片。
+
+### 前端
+- [x] 小节卡片新增“生成人物/场景图片 / 重新生成人物/场景图片”按钮。
+- [x] `storyStore` 新增 `generateSectionAssets` 和小节级 loading 状态。
+- [x] 故事列表和详情页新增 `section_asset_pending` 状态展示。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] Python 导入、请求模型实例化和已有资产匹配复用检查成功。
+- [x] 前端构建成功：`npm run build`。
+- [x] `git diff --check` 无空白错误，仅保留既有 LF/CRLF 换行提示。
+
+### 需要你做的事情
+- [ ] 不需要执行新的 SQL；但如果你还没有执行 `backend/src/main/resources/db/20260521_create_story_assets.sql`，仍需先执行它。
+- [ ] 重启 Java 后端，让新增接口、状态和 RabbitMQ 任务类型生效。
+- [ ] 重启 Python FastAPI，让 `SECTION_ASSET_GENERATE` worker 分支和新的匹配提示词生效。
+- [ ] 在故事详情页进入某个已有小节，点击“生成人物/场景图片”；如果本地资产库已识别为同一人物/场景，会直接复用已有图片和音频。
+
+### 2026-05-21 资产记录匹配但图片为空的补图修复
+- [x] 修复 `matched` 为真但 `image_path` 为空时被误认为可复用的问题。
+- [x] `resolve_single_section_asset` 现在拆分为三种情况：匹配且本地图片文件存在才复用；匹配但 `image_path` 为空或文件不存在则调用豆包补图；完全未匹配则新建资产并生成图片。
+- [x] 新增更明确的 Python 控制台日志：`matched ... image is missing, regenerating`、`existing ... has no usable image, regenerating`、`calling doubao image generation`。
+- [x] Python monkeypatch 检查通过：当已有资产记录 `imagePath=None` 且 `matchedExistingName` 命中时，会进入图片生成调用。
+
+需要你做的事情：
+- [ ] 重启 Python FastAPI，让新的 `resolve_single_section_asset` 判断逻辑生效。
+- [ ] 重新点击“小节人物/场景图片生成”按钮；如果表里有资产记录但 `image_path` 为空，会重新调用豆包生成图片。
+
+### 2026-05-21 图片显示与人物三视图提示词
+- [x] 修复前端图片可能显示不出来的问题：`GET /api/files/**` 已在 Spring Security 中放行，避免 `<img>` 请求因无法携带 Bearer Token 被 401 拦截。
+- [x] 前端资产图片展示增加兜底：如果后端只返回 `imagePath` 相对路径，会自动拼成 `/api/files/{imagePath}`。
+- [x] 通义资产识别提示词增加类型判断要求：人物、怪物、拟人角色进入 `characters`，地点、建筑、房间、战斗场地等进入 `scenes`。
+- [x] 豆包图片提示词按资产类型分流：人物使用“三视图设定图”提示词，要求正面、侧面、背面同图且角色一致；场景使用“环境概念图”提示词。
+- [x] Python 提示词分流检查通过：`CHARACTER` 会包含“三视图/正面、侧面、背面”，`SCENE` 会包含“环境概念图/不要画成人物三视图”。
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] 前端构建成功：`npm run build`。
+
+需要你做的事情：
+- [ ] 重启 Java 后端，让 `/api/files/**` 公开读取配置生效。
+- [ ] 重启 Python FastAPI，让人物三视图和场景概念图提示词生效。
+- [ ] 重新刷新故事详情页；如果图片路径存在且文件在本地，应能直接显示。

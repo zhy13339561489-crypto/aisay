@@ -44,6 +44,20 @@ export interface StoryVolumeSection {
   summary?: string;
   content?: string;
   endingHook?: string;
+  assets?: StoryAsset[];
+}
+
+export interface StoryAsset {
+  id: number;
+  assetType: 'CHARACTER' | 'SCENE' | string;
+  name: string;
+  description?: string;
+  imagePrompt?: string;
+  imagePath?: string;
+  imageUrl?: string;
+  audioPath?: string;
+  audioUrl?: string;
+  firstSectionId?: number;
 }
 
 export interface StoryDetailResponse extends StoryResponse {
@@ -62,6 +76,7 @@ export interface StoryUpdateRequest {
 
 export interface StoryGenerateRequest {
   genre: string;
+  style: string;
   plot?: string;
 }
 

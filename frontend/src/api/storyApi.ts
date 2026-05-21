@@ -66,6 +66,22 @@ export async function generateVolumeSections(id: number, volumeId: number) {
   return unwrap(response.data);
 }
 
+export async function generateSectionAssets(id: number, sectionId: number) {
+  const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-sections/${sectionId}/assets/generate`);
+  return unwrap(response.data);
+}
+
+export async function uploadCharacterAudio(id: number, assetId: number, file: File) {
+  const formData = new FormData();
+  formData.append('file', file);
+  const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/assets/${assetId}/audio`, formData, {
+    headers: {
+      'Content-Type': 'multipart/form-data',
+    },
+  });
+  return unwrap(response.data);
+}
+
 export async function updateVolumeOutlines(id: number, data: StoryVolumeOutlineUpdateRequest) {
   const response = await request.put<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-outline`, data);
   return unwrap(response.data);
