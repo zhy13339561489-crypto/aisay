@@ -638,7 +638,14 @@ prompt_VolumeSectionSingle = """
 5. 禁止只写提纲，禁止用一句话概括，应写成可继续扩写为正文的高密度故事细节。
 6. 最后一节必须自然落到本卷卷末钩子；非最后一节必须为下一节留下承接压力。
 
-你只输出当前这一节。sectionNumber 必须是 {CurrentSectionNumber}。
+输出格式要求：
+1. 不要输出 JSON，不要输出 Markdown 代码块，不要输出额外解释。
+2. 必须严格使用下面 4 个标签包裹内容，标签名不能改：
+<title>当前小节标题</title>
+<summary>当前小节摘要</summary>
+<content>当前小节具体故事细节，可以包含人物对白、引号、换行和场景描写</content>
+<endingHook>当前小节末尾钩子</endingHook>
+3. 只输出当前这一节，当前小节号是第 {CurrentSectionNumber} 节。
 """
 
 

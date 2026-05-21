@@ -1352,3 +1352,15 @@
 需要你做的事情：
 - [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260521_expand_stories_status_length.sql`。
 - [ ] SQL 执行后重新点击“生成小节故事”；这次不需要因为该 SQL 单独重启 Java。
+
+### 2026-05-21 分卷小节 JSON 解析失败修复
+- [x] 定位错误原因：单节故事细节使用 `with_structured_output(VolumeSectionItem)` 时，长正文里的对白引号可能被模型写成未转义字符，导致 tool/function arguments 不是合法 JSON。
+- [x] 保留“小节数量判断”的结构化输出，因为它只返回数字，风险较低。
+- [x] 将“单节故事细节生成”改为普通文本输出，并要求模型用 `<title>`、`<summary>`、`<content>`、`<endingHook>` 标签包裹内容。
+- [x] 新增 `parse_volume_section_text`，由 Python 解析标签并组装 `VolumeSectionItem`，避免正文引号和换行破坏 JSON。
+- [x] 单节生成改用 `streaming_text_llm_base`，控制台可以继续看到 token 流式输出。
+- [x] Python 导入和标签解析检查通过。
+
+需要你做的事情：
+- [ ] 重启 Python FastAPI，让新的小节生成提示词和普通文本解析逻辑生效。
+- [ ] 重新点击对应分卷的“生成小节故事”；之前失败的 RabbitMQ 任务不会自动续跑，需要重新提交一次。

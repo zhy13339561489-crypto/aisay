@@ -37,6 +37,12 @@ structured_llm_base = ChatTongyi(
     streaming=False,
 )
 
+streaming_text_llm_base = ChatTongyi(
+    model="qwen-max",
+    temperature=0.8,
+    streaming=True,
+)
+
 
 class ConsoleStreamingCallback(BaseCallbackHandler):
     """LangChain 控制台回调处理器。

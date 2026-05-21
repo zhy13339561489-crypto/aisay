@@ -1,12 +1,13 @@
 import time
 import uuid
 from collections.abc import Callable
+import re
 
 from fastapi import APIRouter, HTTPException
 from langchain_core.prompts import PromptTemplate
 from pydantic import BaseModel, Field
 
-from ai_runtime import ConsoleStreamingCallback, llm_temperature_0, log_progress, structured_llm_base
+from ai_runtime import ConsoleStreamingCallback, llm_temperature_0, log_progress, streaming_text_llm_base, structured_llm_base
 from prompt import (
     prompt_Outline,
     prompt_ReviseOutline,
@@ -323,6 +324,37 @@ def extract_llm_text(raw_result: object) -> str:
     return str(content).strip()
 
 
+def extract_tagged_text(raw_text: str, tag: str) -> str:
+    """作用：从普通文本输出中提取指定 XML 风格标签内容。
+    调用方：parse_volume_section_text。
+    """
+    pattern = rf"<{tag}>(.*?)</{tag}>"
+    match = re.search(pattern, raw_text, flags=re.DOTALL | re.IGNORECASE)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def parse_volume_section_text(raw_text: str, section_number: int) -> VolumeSectionItem:
+    """作用：把单节普通文本输出解析成小节结构，避免长正文 tool JSON 转义失败。
+    调用方：generate_volume_sections。
+    """
+    title = extract_tagged_text(raw_text, "title")
+    summary = extract_tagged_text(raw_text, "summary")
+    content = extract_tagged_text(raw_text, "content")
+    ending_hook = extract_tagged_text(raw_text, "endingHook")
+    if not content:
+        raise HTTPException(status_code=502, detail="Tongyi model returned malformed volume section text")
+
+    return VolumeSectionItem(
+        sectionNumber=section_number,
+        title=title or f"第 {section_number} 节",
+        summary=summary,
+        content=content,
+        endingHook=ending_hook,
+    )
+
+
 @router.post("/api/story/outline", response_model=StoryOutlineGenerateResponse)
 def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutlineGenerateResponse:
     """作用：根据题材和可选剧情生成结构化剧情大纲、故事摘要和主要角色设定。
@@ -619,12 +651,11 @@ def generate_volume_sections(
     total_sections = count_result.section_count
     log_progress(trace_id, f"section count planned: {total_sections}", started_at, scope)
 
-    section_llm = structured_llm_base.with_structured_output(VolumeSectionItem)
-    section_chain = promptTemplate_VolumeSectionSingle | section_llm
+    section_chain = promptTemplate_VolumeSectionSingle | streaming_text_llm_base
     generated_sections: list[VolumeSectionItem] = []
     for section_number in range(1, total_sections + 1):
         log_progress(trace_id, f"generating section {section_number}/{total_sections}", started_at, scope)
-        section = section_chain.invoke(
+        raw_section = section_chain.invoke(
             {
                 "Title": request.title,
                 "StorySummary": request.story_summary or "",
@@ -641,7 +672,7 @@ def generate_volume_sections(
             },
             config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
         )
-        section.section_number = section_number
+        section = parse_volume_section_text(extract_llm_text(raw_section), section_number)
         generated_sections.append(section)
         log_progress(trace_id, f"section {section_number}/{total_sections} generated: {section.title}", started_at, scope)
         if on_section_generated:
