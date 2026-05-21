@@ -73,5 +73,25 @@ public class StoryDetailResponse extends StoryResponse {
         private String endingHook;
 
         private String detailedContent;
+
+        private List<VolumeSectionItem> sections;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class VolumeSectionItem {
+
+        private Long id;
+
+        private Integer sectionNumber;
+
+        private String title;
+
+        private String summary;
+
+        private String content;
+
+        private String endingHook;
     }
 }

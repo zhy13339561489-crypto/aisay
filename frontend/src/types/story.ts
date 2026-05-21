@@ -34,6 +34,16 @@ export interface StoryVolumeOutline {
   content?: string;
   endingHook?: string;
   detailedContent?: string;
+  sections?: StoryVolumeSection[];
+}
+
+export interface StoryVolumeSection {
+  id: number;
+  sectionNumber: number;
+  title: string;
+  summary?: string;
+  content?: string;
+  endingHook?: string;
 }
 
 export interface StoryDetailResponse extends StoryResponse {

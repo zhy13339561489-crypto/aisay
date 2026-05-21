@@ -43,10 +43,10 @@ public interface StoryService {
     StoryDetailResponse reviseVolumeOutline(Long storyId, Long userId, StoryVolumeOutlineReviseRequest request);
 
     /**
-     * 作用：根据指定分卷大纲异步生成该卷的详细完整故事正文。
-     * 调用方：StoryController#generateVolumeStory。
+     * 作用：根据指定分卷大纲异步生成该卷的小节故事细节。
+     * 调用方：StoryController#generateVolumeSections。
      */
-    StoryDetailResponse generateVolumeStory(Long storyId, Long volumeId, Long userId);
+    StoryDetailResponse generateVolumeSections(Long storyId, Long volumeId, Long userId);
 
     /**
      * 作用：手动保存用户编辑后的分卷大纲列表。

@@ -122,18 +122,29 @@
                 type="primary"
                 plain
                 size="small"
-                :loading="storyStore.generatingVolumeStoryId === volume.id"
-                @click="generateVolumeStory(volume.id)"
+                :loading="storyStore.generatingVolumeSectionsVolumeId === volume.id"
+                @click="generateVolumeSections(volume.id)"
               >
-                生成详细故事
+                生成小节故事
               </el-button>
             </div>
             <p v-if="volume.summary" class="volume-summary">{{ volume.summary }}</p>
             <p v-if="volume.content" class="script-text">{{ volume.content }}</p>
             <p v-if="volume.endingHook" class="ending-hook">卷末钩子：{{ volume.endingHook }}</p>
-            <div v-if="volume.detailedContent" class="volume-story">
-              <h4>详细故事</h4>
-              <p class="script-text">{{ volume.detailedContent }}</p>
+            <div v-if="volume.sections?.length" class="volume-section-list">
+              <article
+                v-for="section in volume.sections"
+                :key="section.id"
+                class="volume-section-card"
+              >
+                <div class="volume-title-row">
+                  <el-tag type="primary" effect="light">第 {{ section.sectionNumber }} 节</el-tag>
+                  <h4>{{ section.title }}</h4>
+                </div>
+                <p v-if="section.summary" class="volume-summary">{{ section.summary }}</p>
+                <p v-if="section.content" class="script-text">{{ section.content }}</p>
+                <p v-if="section.endingHook" class="ending-hook">小节钩子：{{ section.endingHook }}</p>
+              </article>
             </div>
           </article>
         </div>
@@ -598,13 +609,13 @@ async function generateVolumeOutline() {
   startStoryPolling(story.value.id);
 }
 
-async function generateVolumeStory(volumeId: number) {
+async function generateVolumeSections(volumeId: number) {
   if (!story.value) {
     return;
   }
 
-  await storyStore.generateVolumeStory(story.value.id, volumeId);
-  ElMessage.success('分卷详细故事生成任务已提交，完成后会自动刷新');
+  await storyStore.generateVolumeSections(story.value.id, volumeId);
+  ElMessage.success('分卷小节故事生成任务已提交，完成后会自动刷新');
   startStoryPolling(story.value.id);
 }
 
@@ -728,6 +739,9 @@ function statusLabel(status?: string) {
   if (status === 'volume_story_pending') {
     return '分卷正文生成中';
   }
+  if (status === 'volume_section_pending') {
+    return '分卷小节生成中';
+  }
   if (status === 'failed') {
     return '生成失败';
   }
@@ -764,7 +778,7 @@ function stopStoryPolling() {
 }
 
 function isProcessingStatus(status?: string) {
-  return status === 'generating' || status === 'revising' || status === 'volume_pending' || status === 'volume_story_pending';
+  return status === 'generating' || status === 'revising' || status === 'volume_pending' || status === 'volume_story_pending' || status === 'volume_section_pending';
 }
 
 function syncSelectedVolume() {
@@ -912,6 +926,19 @@ h3 {
   border: 1px solid rgba(16, 185, 129, 0.16);
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.82);
+}
+
+.volume-section-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.volume-section-card {
+  padding: 14px;
+  border: 1px solid rgba(29, 78, 216, 0.14);
+  border-radius: 18px;
+  background: rgba(240, 249, 255, 0.72);
 }
 
 .volume-title-row {

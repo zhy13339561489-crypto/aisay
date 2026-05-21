@@ -12,9 +12,11 @@ from story_ai import (
     StoryOutlineReviseRequest,
     StoryVolumeOutlineGenerateRequest,
     StoryVolumeOutlineReviseRequest,
+    StoryVolumeSectionGenerateRequest,
     StoryVolumeStoryGenerateRequest,
     generate_story_outline,
     generate_volume_outline,
+    generate_volume_sections,
     generate_volume_story,
     revise_story_outline,
     revise_volume_outline,
@@ -32,6 +34,7 @@ TASK_STORY_REVISE = "STORY_REVISE"
 TASK_VOLUME_GENERATE = "VOLUME_GENERATE"
 TASK_VOLUME_REVISE = "VOLUME_REVISE"
 TASK_VOLUME_STORY_GENERATE = "VOLUME_STORY_GENERATE"
+TASK_VOLUME_SECTION_GENERATE = "VOLUME_SECTION_GENERATE"
 
 _worker_thread: threading.Thread | None = None
 
@@ -129,6 +132,7 @@ def _handle_story_task(
         "errorMessage": None,
         "storyOutline": None,
         "volumeOutline": None,
+        "volumeSection": None,
         "volumeStory": None,
         "partial": False,
         "completed": False,
@@ -216,6 +220,39 @@ def _handle_story_task(
             result["volumeNumber"] = volume_outline.get("volumeNumber")
             result["volumeStory"] = response.volume_story
             result["completed"] = True
+        elif task_type == TASK_VOLUME_SECTION_GENERATE:
+            volume_outline = (task.get("volumeOutlines") or [None])[0]
+            if not volume_outline:
+                raise ValueError("Volume outline is required for volume section generation")
+
+            def publish_section(section: Any) -> None:
+                if not publish_progress:
+                    return
+                progress_result = _base_result(task)
+                progress_result["success"] = True
+                progress_result["partial"] = True
+                progress_result["completed"] = False
+                progress_result["volumeId"] = task.get("volumeId")
+                progress_result["volumeNumber"] = volume_outline.get("volumeNumber")
+                progress_result["volumeSection"] = {"sections": [section.model_dump(by_alias=True)]}
+                publish_progress(progress_result)
+
+            generate_volume_sections(
+                StoryVolumeSectionGenerateRequest(
+                    userId=task.get("userId"),
+                    storyId=task.get("storyId"),
+                    volumeId=task.get("volumeId"),
+                    title=task.get("title") or "",
+                    storySummary=task.get("storySummary"),
+                    outline=task.get("outline") or "",
+                    mainCharacters=task.get("mainCharacters") or [],
+                    volumeOutline=volume_outline,
+                ),
+                on_section_generated=publish_section,
+            )
+            result["volumeId"] = task.get("volumeId")
+            result["volumeNumber"] = volume_outline.get("volumeNumber")
+            result["completed"] = True
         else:
             raise ValueError(f"Unsupported AI story task type: {task_type}")
 
@@ -244,6 +281,7 @@ def _base_result(task: dict[str, Any]) -> dict[str, Any]:
         "errorMessage": None,
         "storyOutline": None,
         "volumeOutline": None,
+        "volumeSection": None,
         "volumeStory": None,
         "partial": False,
         "completed": False,

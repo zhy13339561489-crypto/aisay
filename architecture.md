@@ -1009,9 +1009,9 @@ sequenceDiagram
 
 这个设计让用户能在详情页逐步看到分卷结果，也避免 RabbitMQ 消息重投时插入重复卷。
 
-### 分卷详细故事生成
+### 分卷小节故事生成
 
-每条分卷大纲现在可以进一步生成该卷的详细完整故事正文。数据层在 `story_volume_outlines` 中新增 `detailed_content` 字段，继续保持“一卷一条记录”的模型：`summary`、`content`、`ending_hook` 保存分卷大纲信息，`detailed_content` 保存根据该卷大纲扩写出来的正文。
+分卷大纲不再直接生成并保存到 `story_volume_outlines.detailed_content`。新的正文细化链路会先把某一卷拆成 4 到 12 个小节，再逐节生成具体故事细节；每个小节独立保存到 `story_volume_sections`，和分卷形成“一卷多节”的关系。这样单卷内容可以边生成边回传，后续也更容易继续扩展到小节编辑、重生成和章节正文生成。
 
 ```mermaid
 sequenceDiagram
@@ -1021,19 +1021,25 @@ sequenceDiagram
     participant Python as rabbitmq_worker/story_ai
     participant LLM as Tongyi
     participant ResultQ as RabbitMQ result queue
-    participant DB as story_volume_outlines
+    participant DB as story_volume_sections
 
-    View->>Java: POST /api/story/{id}/volume-outline/{volumeId}/story/generate
-    Java->>RequestQ: VOLUME_STORY_GENERATE
-    Java-->>View: 返回 volume_story_pending 状态
-    Python->>RequestQ: 消费指定分卷正文生成任务
-    Python->>LLM: prompt_VolumeStory + structured output
-    LLM-->>Python: volumeStory
-    Python->>ResultQ: 发送 volumeStory
+    View->>Java: POST /api/story/{id}/volume-outline/{volumeId}/sections/generate
+    Java->>DB: 清空当前分卷旧小节
+    Java->>RequestQ: VOLUME_SECTION_GENERATE
+    Java-->>View: 返回 volume_section_pending 状态
+    Python->>RequestQ: 消费指定分卷小节生成任务
+    Python->>LLM: 先判断小节数量
+    loop 每生成一节
+        Python->>LLM: 结合总大纲、分卷大纲和前序小节生成当前节
+        Python->>ResultQ: partial=true, volumeSection.sections=[当前节]
+        Java->>ResultQ: 监听当前小节
+        Java->>DB: 按 volumeId + sectionNumber 覆盖写入
+    end
+    Python->>ResultQ: completed=true
     Java->>ResultQ: 监听结果
-    Java->>DB: 更新 detailed_content
+    Java->>DB: story.status = draft
     View->>Java: 轮询故事详情
-    Java-->>View: 返回 detailedContent
+    Java-->>View: 返回分卷与 sections 列表
 ```
 
-这个能力仍属于“非对话大模型调用”，因此不走 `AiEngineClient` 的同步 HTTP，而是沿用 RabbitMQ 异步任务链路。前端每个分卷卡片有独立的“生成详细故事”按钮，生成完成后正文显示在当前分卷下方。
+这个能力仍属于“非对话大模型调用”，因此不走 `AiEngineClient` 的同步 HTTP，而是沿用 RabbitMQ 异步任务链路。Python worker 每生成一节就发送 partial 消息，Java 监听后立即落库，前端通过详情页轮询逐步展示小节卡片。旧的 `detailed_content` 字段保留为兼容历史数据，新功能入口和页面展示都以 `story_volume_sections` 为准。

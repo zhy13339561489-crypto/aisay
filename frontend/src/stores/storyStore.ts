@@ -21,7 +21,7 @@ export const useStoryStore = defineStore('story', () => {
   const isGenerating = ref(false);
   const isGeneratingVolumeOutline = ref(false);
   const isRevisingVolumeOutline = ref(false);
-  const generatingVolumeStoryId = ref<number | null>(null);
+  const generatingVolumeSectionsVolumeId = ref<number | null>(null);
   const isSavingVolumeOutline = ref(false);
   const pagination = ref({
     current: 1,
@@ -135,15 +135,15 @@ export const useStoryStore = defineStore('story', () => {
     }
   }
 
-  async function generateVolumeStory(id: number, volumeId: number) {
-    generatingVolumeStoryId.value = volumeId;
+  async function generateVolumeSections(id: number, volumeId: number) {
+    generatingVolumeSectionsVolumeId.value = volumeId;
     try {
-      const story = await storyApi.generateVolumeStory(id, volumeId);
+      const story = await storyApi.generateVolumeSections(id, volumeId);
       currentStory.value = story;
       upsertStory(story);
       return story;
     } finally {
-      generatingVolumeStoryId.value = null;
+      generatingVolumeSectionsVolumeId.value = null;
     }
   }
 
@@ -183,7 +183,7 @@ export const useStoryStore = defineStore('story', () => {
     isGenerating,
     isGeneratingVolumeOutline,
     isRevisingVolumeOutline,
-    generatingVolumeStoryId,
+    generatingVolumeSectionsVolumeId,
     isSavingVolumeOutline,
     hasStories,
     fetchStories,
@@ -195,7 +195,7 @@ export const useStoryStore = defineStore('story', () => {
     reviseStoryOutline,
     generateVolumeOutline,
     reviseVolumeOutline,
-    generateVolumeStory,
+    generateVolumeSections,
     updateVolumeOutlines,
     deleteStory,
   };

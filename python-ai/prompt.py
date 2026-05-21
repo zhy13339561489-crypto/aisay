@@ -584,6 +584,63 @@ prompt_VolumeStory = """
 - 正文应尽可能细致，包含场景描写、人物行动、对话、心理变化、冲突过程和因果承接。
 """
 
+prompt_VolumeSectionCount = """
+你是一位长篇网文编辑，负责把某一卷分卷大纲拆成适合逐节创作的小节数量。
+
+请根据以下信息判断当前分卷应该拆成多少个小节：
+
+- 书名：{Title}
+- 故事摘要：{StorySummary}
+- 故事总大纲：{Outline}
+- 主要人物设定：{Characters}
+- 卷号：第 {VolumeNumber} 卷
+- 卷名：{VolumeTitle}
+- 分卷摘要：{VolumeSummary}
+- 分卷详细大纲：{VolumeContent}
+- 卷末钩子：{EndingHook}
+
+要求：
+1. 必须选择 4 到 12 之间的整数。
+2. 如果本卷情节较集中，选择 4-6 节。
+3. 如果本卷支线多、反转多、场景跨度大，选择 7-10 节。
+4. 如果本卷是阶段高潮卷或多线并行卷，选择 10-12 节。
+5. 小节数量要服务于剧情推进，不要机械拆分。
+"""
+
+prompt_VolumeSectionSingle = """
+你是一位擅长长篇网文正文创作的小说作者。现在不要一次性输出整卷，只生成当前指定小节的具体故事细节。
+
+全局故事信息：
+- 书名：{Title}
+- 故事摘要：{StorySummary}
+- 故事总大纲：{Outline}
+- 主要人物设定：{Characters}
+
+当前分卷信息：
+- 卷号：第 {VolumeNumber} 卷
+- 卷名：{VolumeTitle}
+- 分卷摘要：{VolumeSummary}
+- 分卷详细大纲：{VolumeContent}
+- 卷末钩子：{EndingHook}
+
+小节位置：
+- 本卷总小节数：{TotalSections}
+- 当前小节号：{CurrentSectionNumber}
+
+已经生成的前序小节：
+{GeneratedSections}
+
+生成要求：
+1. 当前小节必须严格对应“第 {CurrentSectionNumber} 节 / 共 {TotalSections} 节”的叙事位置。
+2. 必须承接前序小节已经发生的事件、人物情绪、因果代价和未解决危机。
+3. 必须推进分卷大纲中的关键事件，不要偏离当前卷核心矛盾。
+4. 内容要是具体故事细节，包含场景、行动、对话、心理、冲突、信息差和小节末尾钩子。
+5. 禁止只写提纲，禁止用一句话概括，应写成可继续扩写为正文的高密度故事细节。
+6. 最后一节必须自然落到本卷卷末钩子；非最后一节必须为下一节留下承接压力。
+
+你只输出当前这一节。sectionNumber 必须是 {CurrentSectionNumber}。
+"""
+
 
 prompt_ChatAgent = """
 你是路由与工具调用代理（Routing & Tool-Calling Agent）。  

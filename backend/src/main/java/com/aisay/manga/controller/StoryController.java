@@ -92,15 +92,15 @@ public class StoryController {
     }
 
     /**
-     * 作用：根据某一卷的分卷大纲异步生成该卷详细完整故事正文。
-     * 调用方：前端故事详情页每个分卷卡片中的“生成详细故事”按钮。
+     * 作用：根据某一卷的分卷大纲异步生成该卷的小节故事细节。
+     * 调用方：前端故事详情页每个分卷卡片中的“生成小节故事”按钮。
      */
-    @PostMapping("/{id}/volume-outline/{volumeId}/story/generate")
-    public ApiResponse<StoryDetailResponse> generateVolumeStory(
+    @PostMapping("/{id}/volume-outline/{volumeId}/sections/generate")
+    public ApiResponse<StoryDetailResponse> generateVolumeSections(
             @PathVariable Long id,
             @PathVariable Long volumeId
     ) {
-        return ApiResponse.success("Volume story generation submitted", storyService.generateVolumeStory(id, volumeId, SecurityUtils.getCurrentUserId()));
+        return ApiResponse.success("Volume section generation submitted", storyService.generateVolumeSections(id, volumeId, SecurityUtils.getCurrentUserId()));
     }
 
     /**

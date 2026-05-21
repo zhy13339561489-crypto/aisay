@@ -30,6 +30,7 @@
         <el-option label="修改中" value="revising" />
         <el-option label="分卷处理中" value="volume_pending" />
         <el-option label="分卷正文生成中" value="volume_story_pending" />
+        <el-option label="分卷小节生成中" value="volume_section_pending" />
         <el-option label="生成失败" value="failed" />
         <el-option label="已发布" value="published" />
         <el-option label="已归档" value="archived" />
@@ -167,6 +168,9 @@ function statusMeta(status?: string): { label: string; type: 'primary' | 'succes
   }
   if (status === 'volume_story_pending') {
     return { label: '分卷正文生成中', type: 'primary' };
+  }
+  if (status === 'volume_section_pending') {
+    return { label: '分卷小节生成中', type: 'primary' };
   }
   if (status === 'failed') {
     return { label: '生成失败', type: 'danger' };

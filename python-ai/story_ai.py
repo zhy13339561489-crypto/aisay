@@ -13,6 +13,8 @@ from prompt import (
     prompt_VolumeCount,
     prompt_VolumeOutlineSingle,
     prompt_VolumeOutline_Editor,
+    prompt_VolumeSectionCount,
+    prompt_VolumeSectionSingle,
     prompt_VolumeStory,
 )
 
@@ -24,6 +26,8 @@ promptTemplate_ReviseOutline = PromptTemplate.from_template(prompt_ReviseOutline
 promptTemplate_VolumeCount = PromptTemplate.from_template(prompt_VolumeCount)
 promptTemplate_VolumeOutlineSingle = PromptTemplate.from_template(prompt_VolumeOutlineSingle)
 promptTemplate_VolumeOutlineEditor = PromptTemplate.from_template(prompt_VolumeOutline_Editor)
+promptTemplate_VolumeSectionCount = PromptTemplate.from_template(prompt_VolumeSectionCount)
+promptTemplate_VolumeSectionSingle = PromptTemplate.from_template(prompt_VolumeSectionSingle)
 promptTemplate_VolumeStory = PromptTemplate.from_template(prompt_VolumeStory)
 
 
@@ -141,6 +145,21 @@ class StoryVolumeStoryGenerateRequest(BaseModel):
     volume_outline: VolumeOutlineItem = Field(alias="volumeOutline")
 
 
+class StoryVolumeSectionGenerateRequest(BaseModel):
+    """分卷小节生成请求体。
+    调用方：rabbitmq_worker 分卷小节生成任务；同时保留 HTTP 路由用于本地调试。
+    """
+
+    user_id: int = Field(alias="userId")
+    story_id: int = Field(alias="storyId")
+    volume_id: int = Field(alias="volumeId")
+    title: str
+    story_summary: str | None = Field(default=None, alias="storySummary")
+    outline: str
+    main_characters: list[MainCharacterSetting] = Field(default_factory=list, alias="mainCharacters")
+    volume_outline: VolumeOutlineItem = Field(alias="volumeOutline")
+
+
 class StoryVolumeOutlineGenerateResponse(BaseModel):
     """分卷大纲生成响应体。
     包含大模型生成的分卷大纲列表。
@@ -153,6 +172,22 @@ class StoryVolumeStoryGenerateResponse(BaseModel):
     """分卷详细故事正文生成响应体。"""
 
     volume_story: str = Field(alias="volumeStory")
+
+
+class VolumeSectionItem(BaseModel):
+    """单个分卷小节故事细节。"""
+
+    section_number: int = Field(alias="sectionNumber", description="Section number, starting from 1")
+    title: str = Field(description="Section title")
+    summary: str = Field(description="Short summary of this section")
+    content: str = Field(description="Detailed story beats for this section, including scene, action, dialogue, conflict, and emotion")
+    ending_hook: str = Field(alias="endingHook", description="Hook or pressure that leads into the next section")
+
+
+class StoryVolumeSectionGenerateResponse(BaseModel):
+    """分卷小节生成响应体。"""
+
+    sections: list[VolumeSectionItem]
 
 
 class NovelOutlineOutput(BaseModel):
@@ -188,6 +223,16 @@ class VolumeCountOutput(BaseModel):
         ge=5,
         le=20,
         description="Recommended total volume count, constrained to an integer between 5 and 20",
+    )
+
+
+class VolumeSectionCountOutput(BaseModel):
+    """分卷小节数量规划结构化输出模型。"""
+
+    section_count: int = Field(
+        ge=4,
+        le=12,
+        description="Recommended section count, constrained to an integer between 4 and 12",
     )
 
 
@@ -231,6 +276,26 @@ def format_volume_outline_context(volumes: list[VolumeOutlineItem]) -> str:
                 f"卷末钩子：{volume.ending_hook}"
             )
             for volume in volumes
+        ]
+    )
+
+
+def format_volume_section_context(sections: list[VolumeSectionItem]) -> str:
+    """作用：把已经生成的小节整理为下一节生成时的上下文。
+    调用方：generate_volume_sections。
+    """
+    if not sections:
+        return "暂无"
+
+    return "\n\n".join(
+        [
+            (
+                f"第 {section.section_number} 节：{section.title}\n"
+                f"摘要：{section.summary}\n"
+                f"具体故事细节：\n{section.content}\n"
+                f"小节钩子：{section.ending_hook}"
+            )
+            for section in sections
         ]
     )
 
@@ -497,4 +562,95 @@ def generate_volume_story(request: StoryVolumeStoryGenerateRequest) -> StoryVolu
     log_progress(trace_id, "model returned volume story text, preparing response", started_at, scope)
     response = StoryVolumeStoryGenerateResponse(volumeStory=volume_story)
     log_progress(trace_id, "volume story response ready", started_at, scope)
+    return response
+
+
+@router.post("/api/story/volume-sections", response_model=StoryVolumeSectionGenerateResponse)
+def generate_volume_sections_endpoint(request: StoryVolumeSectionGenerateRequest) -> StoryVolumeSectionGenerateResponse:
+    """作用：提供 HTTP 调试入口，实际生成逻辑委托给内部函数。
+    调用方：本地调试或直接 HTTP 调用。
+    """
+    return generate_volume_sections(request)
+
+
+def generate_volume_sections(
+    request: StoryVolumeSectionGenerateRequest,
+    on_section_generated: Callable[[VolumeSectionItem], None] | None = None,
+) -> StoryVolumeSectionGenerateResponse:
+    """作用：先规划某一卷的小节数量，再逐小节生成具体故事细节。
+    调用方：rabbitmq_worker 分卷小节生成任务；同时保留 HTTP 路由用于本地调试。
+    """
+    trace_id = uuid.uuid4().hex[:8]
+    started_at = time.perf_counter()
+    scope = "volume-sections"
+    if not request.outline or not request.outline.strip():
+        raise HTTPException(status_code=400, detail="Story outline is required before generating volume sections")
+    if not request.volume_outline.content or not request.volume_outline.content.strip():
+        raise HTTPException(status_code=400, detail="Volume outline content is required before generating sections")
+
+    log_progress(
+        trace_id,
+        (
+            f"request accepted, user_id={request.user_id}, story_id={request.story_id}, "
+            f"volume_id={request.volume_id}, volume={request.volume_outline.volume_number}"
+        ),
+        started_at,
+        scope,
+    )
+
+    characters_text = build_characters_text(request.main_characters)
+    count_llm = llm_temperature_0.with_structured_output(VolumeSectionCountOutput)
+    count_chain = promptTemplate_VolumeSectionCount | count_llm
+    log_progress(trace_id, "planning section count with temperature=0 structured output", started_at, scope)
+    count_result = count_chain.invoke(
+        {
+            "Title": request.title,
+            "StorySummary": request.story_summary or "",
+            "Outline": request.outline,
+            "Characters": characters_text,
+            "VolumeNumber": request.volume_outline.volume_number,
+            "VolumeTitle": request.volume_outline.title,
+            "VolumeSummary": request.volume_outline.summary or "",
+            "VolumeContent": request.volume_outline.content,
+            "EndingHook": request.volume_outline.ending_hook or "",
+        },
+        config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+    )
+    total_sections = count_result.section_count
+    log_progress(trace_id, f"section count planned: {total_sections}", started_at, scope)
+
+    section_llm = structured_llm_base.with_structured_output(VolumeSectionItem)
+    section_chain = promptTemplate_VolumeSectionSingle | section_llm
+    generated_sections: list[VolumeSectionItem] = []
+    for section_number in range(1, total_sections + 1):
+        log_progress(trace_id, f"generating section {section_number}/{total_sections}", started_at, scope)
+        section = section_chain.invoke(
+            {
+                "Title": request.title,
+                "StorySummary": request.story_summary or "",
+                "Outline": request.outline,
+                "Characters": characters_text,
+                "VolumeNumber": request.volume_outline.volume_number,
+                "VolumeTitle": request.volume_outline.title,
+                "VolumeSummary": request.volume_outline.summary or "",
+                "VolumeContent": request.volume_outline.content,
+                "EndingHook": request.volume_outline.ending_hook or "",
+                "TotalSections": total_sections,
+                "CurrentSectionNumber": section_number,
+                "GeneratedSections": format_volume_section_context(generated_sections),
+            },
+            config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+        )
+        section.section_number = section_number
+        generated_sections.append(section)
+        log_progress(trace_id, f"section {section_number}/{total_sections} generated: {section.title}", started_at, scope)
+        if on_section_generated:
+            on_section_generated(section)
+
+    if not generated_sections:
+        raise HTTPException(status_code=502, detail="Tongyi model returned no volume sections")
+
+    log_progress(trace_id, f"model returned {len(generated_sections)} sections, preparing response", started_at, scope)
+    response = StoryVolumeSectionGenerateResponse(sections=generated_sections)
+    log_progress(trace_id, "volume sections response ready", started_at, scope)
     return response

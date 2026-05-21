@@ -5,6 +5,7 @@ import com.aisay.manga.dto.ai.AiStoryTaskMessage;
 import com.aisay.manga.dto.ai.AiStoryTaskResultMessage;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
 import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateResponse;
+import com.aisay.manga.dto.ai.StoryVolumeSectionGenerateResponse;
 import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
 import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
@@ -16,9 +17,11 @@ import com.aisay.manga.dto.response.StoryResponse;
 import com.aisay.manga.entity.Character;
 import com.aisay.manga.entity.Story;
 import com.aisay.manga.entity.StoryVolumeOutline;
+import com.aisay.manga.entity.StoryVolumeSection;
 import com.aisay.manga.repository.CharacterMapper;
 import com.aisay.manga.repository.StoryMapper;
 import com.aisay.manga.repository.StoryVolumeOutlineMapper;
+import com.aisay.manga.repository.StoryVolumeSectionMapper;
 import com.aisay.manga.service.StoryService;
 import com.aisay.manga.utils.AiStoryTaskPublisher;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -30,8 +33,10 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class StoryServiceImpl implements StoryService {
@@ -46,6 +51,8 @@ public class StoryServiceImpl implements StoryService {
 
     private static final String STORY_STATUS_VOLUME_STORY_PENDING = "volume_story_pending";
 
+    private static final String STORY_STATUS_VOLUME_SECTION_PENDING = "volume_section_pending";
+
     private static final String STORY_STATUS_FAILED = "failed";
 
     private static final String OUTLINE_STYLE = "story_outline";
@@ -55,6 +62,8 @@ public class StoryServiceImpl implements StoryService {
     private final CharacterMapper characterMapper;
 
     private final StoryVolumeOutlineMapper storyVolumeOutlineMapper;
+
+    private final StoryVolumeSectionMapper storyVolumeSectionMapper;
 
     private final AiStoryTaskPublisher aiStoryTaskPublisher;
 
@@ -66,11 +75,13 @@ public class StoryServiceImpl implements StoryService {
             StoryMapper storyMapper,
             CharacterMapper characterMapper,
             StoryVolumeOutlineMapper storyVolumeOutlineMapper,
+            StoryVolumeSectionMapper storyVolumeSectionMapper,
             AiStoryTaskPublisher aiStoryTaskPublisher
     ) {
         this.storyMapper = storyMapper;
         this.characterMapper = characterMapper;
         this.storyVolumeOutlineMapper = storyVolumeOutlineMapper;
+        this.storyVolumeSectionMapper = storyVolumeSectionMapper;
         this.aiStoryTaskPublisher = aiStoryTaskPublisher;
     }
 
@@ -213,23 +224,25 @@ public class StoryServiceImpl implements StoryService {
     }
 
     /**
-     * 作用：把指定分卷标记为正文生成任务，异步投递给 Python worker。
-     * 调用方：StoryController#generateVolumeStory。
+     * 作用：把指定分卷标记为小节生成任务，异步投递给 Python worker。
+     * 调用方：StoryController#generateVolumeSections。
      */
     @Override
     @Transactional
-    public StoryDetailResponse generateVolumeStory(Long storyId, Long volumeId, Long userId) {
+    public StoryDetailResponse generateVolumeSections(Long storyId, Long volumeId, Long userId) {
         Story story = getOwnedStory(storyId, userId);
         StoryVolumeOutline volume = getOwnedVolume(storyId, volumeId);
         if (volume.getContent() == null || volume.getContent().isBlank()) {
-            throw new IllegalArgumentException("Volume outline content is required before generating detailed story.");
+            throw new IllegalArgumentException("Volume outline content is required before generating sections.");
         }
 
-        story.setStatus(STORY_STATUS_VOLUME_STORY_PENDING);
+        story.setStatus(STORY_STATUS_VOLUME_SECTION_PENDING);
         story.setUpdatedAt(LocalDateTime.now());
         storyMapper.updateById(story);
+        storyVolumeSectionMapper.delete(new LambdaQueryWrapper<StoryVolumeSection>()
+                .eq(StoryVolumeSection::getVolumeId, volumeId));
 
-        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_STORY_GENERATE, userId, storyId);
+        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_SECTION_GENERATE, userId, storyId);
         message.setVolumeId(volumeId);
         message.setTitle(story.getTitle());
         message.setStorySummary(story.getSynopsis());
@@ -286,6 +299,7 @@ public class StoryServiceImpl implements StoryService {
             case AiRabbitConstants.TASK_VOLUME_GENERATE -> applyGeneratedVolumeOutlineResult(story, result);
             case AiRabbitConstants.TASK_VOLUME_REVISE -> applyVolumeOutline(story, result.getVolumeOutline());
             case AiRabbitConstants.TASK_VOLUME_STORY_GENERATE -> applyVolumeStory(story, result);
+            case AiRabbitConstants.TASK_VOLUME_SECTION_GENERATE -> applyGeneratedVolumeSectionResult(story, result);
             default -> {
                 // Ignore unknown task types so one bad message does not block the listener.
             }
@@ -303,11 +317,15 @@ public class StoryServiceImpl implements StoryService {
                 .eq(Character::getStoryId, storyId)
                 .orderByAsc(Character::getId));
         List<StoryVolumeOutline> volumeOutlines = getVolumeOutlineEntities(storyId);
+        Map<Long, List<StoryVolumeSection>> sectionMap = getVolumeSectionEntities(storyId).stream()
+                .collect(Collectors.groupingBy(StoryVolumeSection::getVolumeId));
 
         StoryDetailResponse response = new StoryDetailResponse();
         fillStoryResponse(response, story);
         response.setFullContent(story.getFullContent());
-        response.setVolumeOutlines(volumeOutlines.stream().map(this::toVolumeOutlineItem).toList());
+        response.setVolumeOutlines(volumeOutlines.stream()
+                .map(volume -> toVolumeOutlineItem(volume, sectionMap.getOrDefault(volume.getId(), List.of())))
+                .toList());
         response.setCharacters(characters.stream().map(this::toCharacterItem).toList());
         response.setScenes(List.of());
         return response;
@@ -483,6 +501,38 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.updateById(story);
     }
 
+    private void applyGeneratedVolumeSectionResult(Story story, AiStoryTaskResultMessage result) {
+        if (Boolean.TRUE.equals(result.getPartial())) {
+            applyPartialVolumeSection(story, result.getVolumeId(), result.getVolumeSection());
+            return;
+        }
+
+        if (Boolean.TRUE.equals(result.getCompleted())) {
+            story.setStatus(STORY_STATUS_DRAFT);
+            story.setUpdatedAt(LocalDateTime.now());
+            storyMapper.updateById(story);
+            return;
+        }
+
+        applyPartialVolumeSection(story, result.getVolumeId(), result.getVolumeSection());
+    }
+
+    private void applyPartialVolumeSection(Story story, Long volumeId, StoryVolumeSectionGenerateResponse response) {
+        if (volumeId == null || response == null || response.getSections() == null || response.getSections().isEmpty()) {
+            return;
+        }
+
+        StoryVolumeOutline volume = storyVolumeOutlineMapper.selectById(volumeId);
+        if (volume == null || !story.getId().equals(volume.getStoryId())) {
+            return;
+        }
+
+        response.getSections().forEach(section -> replaceSingleVolumeSection(story.getId(), volumeId, section));
+        story.setStatus(STORY_STATUS_VOLUME_SECTION_PENDING);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+    }
+
     private List<StoryOutlineGenerateResponse.MainCharacterSetting> getMainCharacterSettings(Long storyId) {
         return characterMapper.selectList(new LambdaQueryWrapper<Character>()
                         .eq(Character::getStoryId, storyId)
@@ -581,6 +631,49 @@ public class StoryServiceImpl implements StoryService {
                 .orderByAsc(StoryVolumeOutline::getId));
     }
 
+    private List<StoryVolumeSection> getVolumeSectionEntities(Long storyId) {
+        return storyVolumeSectionMapper.selectList(new LambdaQueryWrapper<StoryVolumeSection>()
+                .eq(StoryVolumeSection::getStoryId, storyId)
+                .orderByAsc(StoryVolumeSection::getVolumeId)
+                .orderByAsc(StoryVolumeSection::getSectionNumber)
+                .orderByAsc(StoryVolumeSection::getId));
+    }
+
+    private void replaceSingleVolumeSection(
+            Long storyId,
+            Long volumeId,
+            StoryVolumeSectionGenerateResponse.VolumeSectionItem item
+    ) {
+        if (item == null) {
+            return;
+        }
+
+        Integer sectionNumber = item.getSectionNumber();
+        if (sectionNumber == null) {
+            List<StoryVolumeSection> existingSections = storyVolumeSectionMapper.selectList(new LambdaQueryWrapper<StoryVolumeSection>()
+                    .eq(StoryVolumeSection::getVolumeId, volumeId)
+                    .orderByAsc(StoryVolumeSection::getSectionNumber));
+            sectionNumber = existingSections.size() + 1;
+        }
+
+        storyVolumeSectionMapper.delete(new LambdaQueryWrapper<StoryVolumeSection>()
+                .eq(StoryVolumeSection::getVolumeId, volumeId)
+                .eq(StoryVolumeSection::getSectionNumber, sectionNumber));
+
+        LocalDateTime now = LocalDateTime.now();
+        StoryVolumeSection section = new StoryVolumeSection();
+        section.setStoryId(storyId);
+        section.setVolumeId(volumeId);
+        section.setSectionNumber(sectionNumber);
+        section.setTitle(resolveText(item.getTitle(), "Section " + sectionNumber));
+        section.setSummary(item.getSummary());
+        section.setContent(item.getContent());
+        section.setEndingHook(item.getEndingHook());
+        section.setCreatedAt(now);
+        section.setUpdatedAt(now);
+        storyVolumeSectionMapper.insert(section);
+    }
+
     private Story getOwnedStory(Long storyId, Long userId) {
         Story story = storyMapper.selectById(storyId);
         if (story == null) {
@@ -665,7 +758,10 @@ public class StoryServiceImpl implements StoryService {
         );
     }
 
-    private StoryDetailResponse.VolumeOutlineItem toVolumeOutlineItem(StoryVolumeOutline volume) {
+    private StoryDetailResponse.VolumeOutlineItem toVolumeOutlineItem(
+            StoryVolumeOutline volume,
+            List<StoryVolumeSection> sections
+    ) {
         return new StoryDetailResponse.VolumeOutlineItem(
                 volume.getId(),
                 volume.getVolumeNumber(),
@@ -673,7 +769,19 @@ public class StoryServiceImpl implements StoryService {
                 volume.getSummary(),
                 volume.getContent(),
                 volume.getEndingHook(),
-                volume.getDetailedContent()
+                volume.getDetailedContent(),
+                sections.stream().map(this::toVolumeSectionItem).toList()
+        );
+    }
+
+    private StoryDetailResponse.VolumeSectionItem toVolumeSectionItem(StoryVolumeSection section) {
+        return new StoryDetailResponse.VolumeSectionItem(
+                section.getId(),
+                section.getSectionNumber(),
+                section.getTitle(),
+                section.getSummary(),
+                section.getContent(),
+                section.getEndingHook()
         );
     }
 }

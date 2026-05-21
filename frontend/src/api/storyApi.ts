@@ -61,8 +61,8 @@ export async function reviseVolumeOutline(id: number, data: StoryVolumeOutlineRe
   return unwrap(response.data);
 }
 
-export async function generateVolumeStory(id: number, volumeId: number) {
-  const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-outline/${volumeId}/story/generate`);
+export async function generateVolumeSections(id: number, volumeId: number) {
+  const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-outline/${volumeId}/sections/generate`);
   return unwrap(response.data);
 }
 

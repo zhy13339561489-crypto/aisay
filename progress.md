@@ -1305,3 +1305,50 @@
 需要你做的事情：
 - [ ] 重启 Python FastAPI，让修复后的 `generate_volume_story` 生效。
 - [ ] 重新点击对应分卷的“生成详细故事”按钮测试。
+
+## 2026-05-21 分卷小节故事生成
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260521_create_story_volume_sections.sql`，创建 `story_volume_sections` 小节表。
+- [x] 同步更新 `backend/src/main/resources/db/init.sql`，新环境初始化时会创建小节表。
+- [x] 小节表通过 `story_id` 关联故事，通过 `volume_id` 关联分卷大纲，并使用 `volume_id + section_number` 保证同一分卷内小节序号唯一。
+
+### 后端
+- [x] 新增 `StoryVolumeSection` 实体、`StoryVolumeSectionMapper` 和 `StoryVolumeSectionGenerateResponse`。
+- [x] 新增 RabbitMQ 任务类型 `VOLUME_SECTION_GENERATE`，用于替代前端原来的“生成详细故事”入口。
+- [x] 新增接口 `POST /api/story/{id}/volume-outline/{volumeId}/sections/generate`，提交指定分卷的小节故事生成任务。
+- [x] 提交小节生成时会先清空当前分卷已有小节，再进入 `volume_section_pending` 状态。
+- [x] Java 监听到 Python partial 小节结果后，按 `volumeId + sectionNumber` 覆盖写入 `story_volume_sections`。
+- [x] 故事详情返回的每个分卷新增 `sections` 列表，用于前端展示小节故事细节。
+
+### Python
+- [x] 新增 `prompt_VolumeSectionCount`，使用温度为 0 的结构化输出先判断当前分卷应拆成多少小节。
+- [x] 新增 `prompt_VolumeSectionSingle`，逐节生成具体故事细节，并把前序小节作为上下文保证前后连续。
+- [x] 新增 `/api/story/volume-sections` 调试路由和 `generate_volume_sections` 函数。
+- [x] RabbitMQ worker 支持消费 `VOLUME_SECTION_GENERATE`，每生成一节就发送 partial 消息给 Java，全部完成后再发送 completed 消息。
+
+### 前端
+- [x] 分卷卡片按钮从“生成详细故事”改为“生成小节故事”。
+- [x] 分卷详情不再展示 `detailedContent`，改为展示 `sections` 小节卡片。
+- [x] 故事列表和详情页新增 `volume_section_pending` 状态展示。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] Python 导入和请求模型实例化检查成功：`import main, rabbitmq_worker, story_ai`。
+- [x] 前端构建成功：`npm run build`。
+- [x] 前端构建仍有 Sass legacy JS API、Rollup 注释和大 chunk 警告，属于既有非阻断警告。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260521_create_story_volume_sections.sql`。
+- [ ] 重启 Java 后端，让新增实体、接口、RabbitMQ 任务类型和结果落库逻辑生效。
+- [ ] 重启 Python FastAPI，让 `VOLUME_SECTION_GENERATE` worker 分支和新提示词生效。
+- [ ] 刷新前端后进入故事详情页，选择某一卷并点击“生成小节故事”，页面应随着轮询逐步显示已生成的小节。
+- [ ] 旧的 `story_volume_outlines.detailed_content` 字段暂时保留兼容历史数据，新功能不再依赖它。
+
+### 2026-05-21 分卷小节生成 500 修复
+- [x] 定位 `POST /api/story/{id}/volume-outline/{volumeId}/sections/generate` 返回 500 的原因：`stories.status` 是 `VARCHAR(20)`，新状态值 `volume_section_pending` 长度为 22，写入时 MySQL 报字段过长。
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260521_expand_stories_status_length.sql`，将 `stories.status` 扩展为 `VARCHAR(50)`。
+- [x] 同步更新 `backend/src/main/resources/db/init.sql`，新环境初始化时 `stories.status` 直接使用 `VARCHAR(50)`。
+
+需要你做的事情：
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260521_expand_stories_status_length.sql`。
+- [ ] SQL 执行后重新点击“生成小节故事”；这次不需要因为该 SQL 单独重启 Java。
