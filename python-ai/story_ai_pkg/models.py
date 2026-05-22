@@ -213,6 +213,12 @@ class StoryOutlineReviseRequest(BaseModel):
     # 故事标题
     title: str
 
+    # 题材，如科幻、玄幻、都市、悬疑
+    genre: str | None = None
+
+    # 用户设定的漫剧视觉风格，可选
+    story_style: str | None = Field(default=None, alias="storyStyle")
+
     # 故事摘要，可选
     synopsis: str | None = None
 
@@ -239,6 +245,12 @@ class StoryVolumeOutlineGenerateRequest(BaseModel):
     # 故事标题
     title: str
 
+    # 题材，如科幻、玄幻、都市、悬疑
+    genre: str | None = None
+
+    # 用户设定的漫剧视觉风格，可选
+    story_style: str | None = Field(default=None, alias="storyStyle")
+
     # 故事摘要，可选
     story_summary: str | None = Field(default=None, alias="storySummary")
 
@@ -264,6 +276,12 @@ class StoryVolumeOutlineReviseRequest(BaseModel):
 
     # 故事标题
     title: str
+
+    # 题材，如科幻、玄幻、都市、悬疑
+    genre: str | None = None
+
+    # 用户设定的漫剧视觉风格，可选
+    story_style: str | None = Field(default=None, alias="storyStyle")
 
     # 故事摘要，可选
     story_summary: str | None = Field(default=None, alias="storySummary")
@@ -300,6 +318,9 @@ class StoryVolumeStoryGenerateRequest(BaseModel):
     # 故事标题
     title: str
 
+    # 题材，如科幻、玄幻、都市、悬疑
+    genre: str | None = None
+
     # 漫剧视觉风格，可选
     story_style: str | None = Field(default=None, alias="storyStyle")
 
@@ -334,6 +355,9 @@ class StoryVolumeSectionGenerateRequest(BaseModel):
 
     # 故事标题
     title: str
+
+    # 题材，如科幻、玄幻、都市、悬疑
+    genre: str | None = None
 
     # 漫剧视觉风格，可选
     story_style: str | None = Field(default=None, alias="storyStyle")
@@ -372,6 +396,9 @@ class StorySectionAssetGenerateRequest(BaseModel):
 
     # 故事标题
     title: str
+
+    # 题材，如科幻、玄幻、都市、悬疑
+    genre: str | None = None
 
     # 漫剧视觉风格，可选
     story_style: str | None = Field(default=None, alias="storyStyle")
@@ -413,6 +440,9 @@ class StorySectionScriptGenerateRequest(BaseModel):
 
     # 故事标题
     title: str
+
+    # 题材，如科幻、玄幻、都市、悬疑
+    genre: str | None = None
 
     # 漫剧视觉风格，可选
     story_style: str | None = Field(default=None, alias="storyStyle")

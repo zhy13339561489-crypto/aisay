@@ -59,7 +59,11 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
     structured_llm = structured_llm_base.with_structured_output(NovelOutlineOutput)
 
     # 构建 LangChain 链：提示词模板 → 结构化 LLM
-    chain = load_prompt_template("generate_story_outline") | structured_llm
+    chain = load_prompt_template(
+        "generate_story_outline",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | structured_llm
 
     # 打印链创建完成日志
     log_progress(trace_id, "structured chain created, invoking Tongyi model in non-streaming mode", started_at)
@@ -140,7 +144,11 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
     structured_llm = structured_llm_base.with_structured_output(OutlineRevisionOutput)
 
     # 构建 LangChain 链
-    chain = load_prompt_template("revise_story_outline") | structured_llm
+    chain = load_prompt_template(
+        "revise_story_outline",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | structured_llm
 
     # 打印链创建日志
     log_progress(trace_id, "structured revision chain created, invoking Tongyi model in non-streaming mode", started_at, scope)
@@ -149,6 +157,8 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
     result = invoke_llm_with_retry(
         chain,
         {
+            "Theme": request.genre or "未指定",
+            "StoryStyle": request.story_style or "未指定，按题材自然推导",
             "OriginalOutline": original_outline,   # 原始大纲文本
             "RevisionNotes": request.suggestion,   # 用户修改意见
         },

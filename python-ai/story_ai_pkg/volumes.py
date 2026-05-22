@@ -82,13 +82,19 @@ def generate_volume_outline(
     # ── 第一阶段：规划总分卷数 ──────────────────────────────────────────
     # 使用温度为 0 的模型，输出最确定性的分卷数量
     count_llm = llm_temperature_0.with_structured_output(VolumeCountOutput)
-    count_chain = load_prompt_template("generate_volume_count") | count_llm
+    count_chain = load_prompt_template(
+        "generate_volume_count",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | count_llm
     log_progress(trace_id, "planning total volume count with temperature=0 structured output", started_at, scope)
 
     count_result = invoke_llm_with_retry(
         count_chain,
         {
             "Title": request.title,
+            "Theme": request.genre or "未指定",
+            "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
             "StorySummary": request.story_summary or "",
             "Outline": request.outline,
             "Characters": characters_text,
@@ -104,7 +110,11 @@ def generate_volume_outline(
     # ── 第二阶段：逐卷生成详细大纲 ──────────────────────────────────────
     # 创建单卷生成 LLM，绑定 VolumeOutlineItem 模型
     single_volume_llm = structured_llm_base.with_structured_output(VolumeOutlineItem)
-    single_volume_chain = load_prompt_template("generate_volume_outline_single") | single_volume_llm
+    single_volume_chain = load_prompt_template(
+        "generate_volume_outline_single",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | single_volume_llm
 
     # 存储已生成的分卷列表
     generated_volumes: list[VolumeOutlineItem] = []
@@ -118,6 +128,8 @@ def generate_volume_outline(
             single_volume_chain,
             {
                 "Title": request.title,
+                "Theme": request.genre or "未指定",
+                "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
                 "StorySummary": request.story_summary or "",
                 "Outline": request.outline,
                 "Characters": characters_text,
@@ -202,7 +214,11 @@ def revise_volume_outline(request: StoryVolumeOutlineReviseRequest) -> StoryVolu
     structured_llm = structured_llm_base.with_structured_output(VolumeOutlineOutput)
 
     # 构建链
-    chain = load_prompt_template("revise_volume_outline") | structured_llm
+    chain = load_prompt_template(
+        "revise_volume_outline",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | structured_llm
     log_progress(trace_id, "structured volume revision chain created, invoking Tongyi model in non-streaming mode", started_at, scope)
 
     # 调用大模型
@@ -210,6 +226,8 @@ def revise_volume_outline(request: StoryVolumeOutlineReviseRequest) -> StoryVolu
         chain,
         {
             "Title": request.title,
+            "Theme": request.genre or "未指定",
+            "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
             "StorySummary": request.story_summary or "",
             "Outline": request.outline,
             "Characters": characters_text,
@@ -268,7 +286,11 @@ def generate_volume_story(request: StoryVolumeStoryGenerateRequest) -> StoryVolu
     )
 
     # 构建链：提示词模板 → LLM（纯文本输出）
-    chain = load_prompt_template("generate_volume_story") | structured_llm_base
+    chain = load_prompt_template(
+        "generate_volume_story",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | structured_llm_base
     log_progress(trace_id, "plain text volume story chain created, invoking Tongyi model", started_at, scope)
 
     # 调用大模型
@@ -276,6 +298,7 @@ def generate_volume_story(request: StoryVolumeStoryGenerateRequest) -> StoryVolu
         chain,
         {
             "Title": request.title,
+            "Theme": request.genre or "未指定",
             "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
             "StorySummary": request.story_summary or "",
             "Outline": request.outline,

@@ -1655,3 +1655,79 @@
 ### 需要你做的事情
 - [ ] 重启 Python FastAPI / RabbitMQ worker，让 LLM 自动重试逻辑生效。
 - [ ] 如果 3 次重试后仍失败，说明上游服务当时不可用或网络持续异常，需要稍后重试任务。
+
+## 2026-05-22 特定 Prompt 匹配
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260522_add_ai_prompt_specific_matching.sql`，为 `ai_prompts` 增加特定 Prompt 匹配字段。
+- [x] 新增字段：`base_prompt_key`、`prompt_scope`、`match_genre`、`match_style`、`priority`。
+- [x] 默认 Prompt 会把 `base_prompt_key` 设置为自身 `prompt_key`，`prompt_scope=DEFAULT`。
+- [x] 特定 Prompt 使用 `prompt_scope=SPECIFIC`，通过 `base_prompt_key` 指向默认 Prompt，并可设置题材、风格和优先级。
+- [x] `init.sql` 和 `20260522_create_ai_prompts.sql` 已同步新字段，新环境初始化会直接具备该能力。
+
+### 后端
+- [x] `AiPrompt`、请求 DTO 和响应 DTO 已增加特定 Prompt 字段。
+- [x] Java 管理逻辑支持创建/编辑默认 Prompt 和特定 Prompt。
+- [x] 特定 Prompt 校验规则：必须指定 `basePromptKey`，并且至少填写 `matchGenre` 或 `matchStyle`。
+- [x] 默认 Prompt 会自动清空匹配题材/风格，作为兜底模板使用。
+
+### Python
+- [x] Python 仍然只读 MySQL，不做 Prompt 新增、修改、删除。
+- [x] `prompt_repository` 已支持按 `prompt_key + genre + story_style` 读取最匹配模板。
+- [x] 匹配顺序：同时命中题材和风格的特定 Prompt > 单独命中题材/风格的特定 Prompt > 默认 Prompt > `prompt.py` 文件兜底。
+- [x] `generate_story_outline` 调用时会把用户选择的题材和漫剧风格传给 Prompt 读取层，用于选择特定 Prompt。
+
+### 前端
+- [x] Prompt 管理页面新增“默认 Prompt / 特定 Prompt”类型。
+- [x] 列表新增基础 Key、匹配条件展示。
+- [x] 编辑弹窗新增基础 Prompt Key、匹配题材、匹配风格和优先级。
+- [x] 前端会阻止保存没有基础 Key 或没有任何匹配条件的特定 Prompt。
+- [x] Prompt 管理列表改为树形展示：默认 Prompt 为父节点，特定 Prompt 作为默认 Prompt 的下一级子节点。
+- [x] 默认 Prompt 行新增“新增特定”按钮，会自动继承基础 Key、分类、模板正文和参数详情。
+- [x] 匹配题材和匹配风格已改为下拉选择，选项来自“大纲配置”中的启用题材和启用漫剧风格。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml -q compile`。
+- [x] 前端构建成功：`npm run build`。新增父子树和题材/风格下拉后再次构建通过。
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -B -c "import story_ai, chat_ai; print('python import ok')"`。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260522_add_ai_prompt_specific_matching.sql`。
+- [ ] 重启 Java 后端，让 Prompt 管理字段生效。
+- [ ] 重启 Python FastAPI / RabbitMQ worker，让特定 Prompt 匹配逻辑生效。
+- [ ] 在 Prompt 管理中新增特定 Prompt 示例：`promptScope=SPECIFIC`，`basePromptKey=generate_story_outline`，再填写匹配题材和/或匹配风格。
+
+## 2026-05-22 全链路特定 Prompt 匹配
+### 调整内容
+- [x] Java 非对话 AI 任务在投递 RabbitMQ 前补齐当前漫剧的 `genre` 和 `storyStyle`，包括剧情大纲修改、分卷生成/修改、小节生成、资产识别和分镜脚本生成。
+- [x] Java 对话系统调用 Python Chat Agent 时同步传入绑定漫剧的题材和风格。
+- [x] Python 请求模型补齐 `genre` / `storyStyle` 字段，RabbitMQ worker 会把 Java 消息中的题材和风格传入对应的大模型函数。
+- [x] 所有 `load_prompt_template` / `get_prompt_template` 调用已改为携带当前漫剧题材和风格，优先匹配特定 Prompt，未命中时回退默认 Prompt。
+- [x] 大模型调用 payload 增加通用 `Theme` 和 `StoryStyle` 变量，后续自定义特定 Prompt 时可以直接引用这两个占位符。
+
+### 覆盖范围
+- [x] 剧情大纲生成：使用用户选择的题材和漫剧风格匹配 Prompt。
+- [x] 剧情大纲自动修改：使用当前漫剧已保存的题材和风格匹配 Prompt。
+- [x] 分卷数量判断、逐卷大纲生成、分卷大纲自动修改和分卷正文生成：使用当前漫剧题材和风格匹配 Prompt。
+- [x] 小节数量判断、逐节故事细节生成、人物/场景资产识别、小节分镜脚本生成：使用当前漫剧题材和风格匹配 Prompt。
+- [x] 对话 Agent：使用当前会话绑定漫剧的题材和风格匹配 `chat_agent` 特定 Prompt。
+
+### 需要你做的事情
+- [ ] 重启 Java 后端，让新增的 `ChatAgentRequest` 字段和 AI 任务消息补齐逻辑生效。
+- [ ] 重启 Python FastAPI / RabbitMQ worker，让所有大模型调用按题材/风格匹配特定 Prompt。
+- [ ] 如果新增特定 Prompt 的模板里引用了 `{Theme}` 或 `{StoryStyle}`，确认对应 Prompt 的输入参数说明中也补上这两个参数。
+
+## 2026-05-22 Prompt 保存超时误报修复
+### 问题现象
+- [x] 保存特定 Prompt 时，后端实际已经完成写库，但前端仍提示超时。
+
+### 调整内容
+- [x] Prompt 管理相关 API 单独设置 60 秒超时，避免复用全局 15 秒超时导致长模板保存或列表刷新误报。
+- [x] 前端保存流程拆分为“保存”和“刷新列表”两步：保存成功后立即关闭弹窗并提示成功。
+- [x] 如果保存后的列表刷新超时，只提示“已保存但刷新超时”，不再把它误判成保存失败。
+
+### 验证结果
+- [x] 前端构建成功：`npm run build`。
+- [x] `git diff --check` 无格式错误，仅有既有 CRLF 提示。
+
+### 需要你做的事情
+- [ ] 重启或刷新前端开发服务后，再保存一次特定 Prompt 验证提示是否正常。

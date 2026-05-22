@@ -159,6 +159,8 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.updateById(story);
 
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_STORY_REVISE, userId, storyId);
+        message.setGenre(story.getGenre());
+        message.setStoryStyle(story.getStyle());
         message.setTitle(story.getTitle());
         message.setStorySummary(story.getSynopsis());
         message.setOutline(story.getFullContent());
@@ -212,6 +214,8 @@ public class StoryServiceImpl implements StoryService {
         storyVolumeOutlineMapper.delete(new LambdaQueryWrapper<StoryVolumeOutline>().eq(StoryVolumeOutline::getStoryId, storyId));
 
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_GENERATE, userId, storyId);
+        message.setGenre(story.getGenre());
+        message.setStoryStyle(story.getStyle());
         message.setTitle(story.getTitle());
         message.setStorySummary(story.getSynopsis());
         message.setOutline(story.getFullContent());
@@ -242,6 +246,8 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.updateById(story);
 
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_REVISE, userId, storyId);
+        message.setGenre(story.getGenre());
+        message.setStoryStyle(story.getStyle());
         message.setTitle(story.getTitle());
         message.setStorySummary(story.getSynopsis());
         message.setOutline(story.getFullContent());
@@ -274,6 +280,7 @@ public class StoryServiceImpl implements StoryService {
 
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_VOLUME_SECTION_GENERATE, userId, storyId);
         message.setVolumeId(volumeId);
+        message.setGenre(story.getGenre());
         message.setTitle(story.getTitle());
         message.setStoryStyle(story.getStyle());
         message.setStorySummary(story.getSynopsis());
@@ -305,6 +312,7 @@ public class StoryServiceImpl implements StoryService {
 
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_SECTION_ASSET_GENERATE, userId, storyId);
         message.setVolumeId(volume.getId());
+        message.setGenre(story.getGenre());
         message.setTitle(story.getTitle());
         message.setStoryStyle(story.getStyle());
         message.setStorySummary(story.getSynopsis());
@@ -338,6 +346,7 @@ public class StoryServiceImpl implements StoryService {
 
         AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_SECTION_SCRIPT_GENERATE, userId, storyId);
         message.setVolumeId(volume.getId());
+        message.setGenre(story.getGenre());
         message.setTitle(story.getTitle());
         message.setStoryStyle(story.getStyle());
         message.setStorySummary(story.getSynopsis());

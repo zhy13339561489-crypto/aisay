@@ -526,7 +526,11 @@ def resolve_section_assets(
     """
     # 创建结构化输出 LLM，绑定 SectionAssetExtractionOutput 模型
     extraction_llm = llm_temperature_0.with_structured_output(SectionAssetExtractionOutput)
-    extraction_chain = load_prompt_template("extract_section_assets") | extraction_llm
+    extraction_chain = load_prompt_template(
+        "extract_section_assets",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | extraction_llm
 
     # 打印识别开始日志
     log_progress(trace_id, f"extracting assets for section {section.section_number}", started_at, scope)
@@ -536,6 +540,7 @@ def resolve_section_assets(
         extraction_chain,
         {
             "Title": request.title,
+            "Theme": request.genre or "未指定",
             "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
             "StorySummary": request.story_summary or "",
             "Outline": request.outline,

@@ -17,6 +17,10 @@ public class ChatAgentRequest {
 
     private String title;
 
+    private String genre;
+
+    private String storyStyle;
+
     private String synopsis;
 
     private String outline;

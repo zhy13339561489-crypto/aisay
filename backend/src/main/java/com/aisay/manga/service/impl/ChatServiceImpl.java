@@ -188,6 +188,8 @@ public class ChatServiceImpl implements ChatService {
                     session.getId(),
                     story.getId(),
                     story.getTitle(),
+                    story.getGenre(),
+                    story.getStyle(),
                     story.getSynopsis(),
                     story.getFullContent(),
                     userMessage

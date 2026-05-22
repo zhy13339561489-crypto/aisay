@@ -30,13 +30,30 @@
 
       <el-table
         v-loading="promptStore.isLoading"
-        :data="promptStore.prompts"
+        :data="promptTree"
         class="prompt-table"
         row-key="id"
+        default-expand-all
       >
         <el-table-column prop="promptKey" label="Prompt Key" min-width="220" />
+        <el-table-column label="类型" width="110">
+          <template #default="{ row }">
+            <el-tag :type="row.promptScope === 'SPECIFIC' ? 'warning' : 'success'" effect="light">
+              {{ row.promptScope === 'SPECIFIC' ? '特定' : '默认' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="basePromptKey" label="基础 Key" min-width="200" />
         <el-table-column prop="promptName" label="名称" min-width="160" />
         <el-table-column prop="category" label="分类" width="150" />
+        <el-table-column label="匹配条件" min-width="220">
+          <template #default="{ row }">
+            <span v-if="row.promptScope === 'SPECIFIC'">
+              {{ formatMatchCondition(row) }}
+            </span>
+            <span v-else class="muted-text">默认兜底</span>
+          </template>
+        </el-table-column>
         <el-table-column label="参数" width="110">
           <template #default="{ row }">
             <el-tag effect="plain">{{ row.parameters?.length || 0 }} 个</el-tag>
@@ -52,8 +69,16 @@
           </template>
         </el-table-column>
         <el-table-column prop="updatedAt" label="更新时间" min-width="180" />
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="260" fixed="right">
           <template #default="{ row }">
+            <el-button
+              v-if="row.promptScope !== 'SPECIFIC'"
+              link
+              type="success"
+              @click="openCreateSpecificDialog(row)"
+            >
+              新增特定
+            </el-button>
             <el-button link type="primary" @click="openEditDialog(row.id)">编辑</el-button>
             <el-button link type="danger" @click="deletePrompt(row)">删除</el-button>
           </template>
@@ -67,11 +92,69 @@
           <el-form-item label="Prompt Key" prop="promptKey">
             <el-input v-model.trim="form.promptKey" maxlength="100" show-word-limit placeholder="generate_story_outline" />
           </el-form-item>
+          <el-form-item label="Prompt 类型">
+            <el-select v-model="form.promptScope" placeholder="请选择类型" @change="handlePromptScopeChange">
+              <el-option label="默认 Prompt" value="DEFAULT" />
+              <el-option label="特定 Prompt" value="SPECIFIC" />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="基础 Prompt Key">
+            <el-select
+              v-model.trim="form.basePromptKey"
+              :disabled="form.promptScope === 'DEFAULT'"
+              placeholder="generate_story_outline"
+              filterable
+            >
+              <el-option
+                v-for="prompt in defaultPromptOptions"
+                :key="prompt.promptKey"
+                :label="`${prompt.promptName}（${prompt.promptKey}）`"
+                :value="prompt.promptKey"
+              />
+            </el-select>
+          </el-form-item>
           <el-form-item label="名称" prop="promptName">
             <el-input v-model.trim="form.promptName" maxlength="100" show-word-limit placeholder="生成剧情大纲" />
           </el-form-item>
           <el-form-item label="分类">
             <el-input v-model.trim="form.category" maxlength="50" show-word-limit placeholder="story_outline" />
+          </el-form-item>
+          <el-form-item label="匹配题材">
+            <el-select
+              v-model.trim="form.matchGenre"
+              :disabled="form.promptScope === 'DEFAULT'"
+              clearable
+              filterable
+              placeholder="科幻"
+              :loading="outlineOptionStore.isLoading"
+            >
+              <el-option
+                v-for="option in outlineOptionStore.genreOptions"
+                :key="option.id"
+                :label="option.name"
+                :value="option.name"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="匹配风格">
+            <el-select
+              v-model.trim="form.matchStyle"
+              :disabled="form.promptScope === 'DEFAULT'"
+              clearable
+              filterable
+              placeholder="国漫电影感"
+              :loading="outlineOptionStore.isLoading"
+            >
+              <el-option
+                v-for="option in outlineOptionStore.styleOptions"
+                :key="option.id"
+                :label="option.name"
+                :value="option.name"
+              />
+            </el-select>
+          </el-form-item>
+          <el-form-item label="优先级">
+            <el-input-number v-model="form.priority" :min="0" :max="9999" controls-position="right" />
           </el-form-item>
           <el-form-item label="启用">
             <el-switch v-model="form.enabled" active-text="启用" inactive-text="停用" />
@@ -129,10 +212,12 @@
 <script setup lang="ts">
 import { computed, defineComponent, h, onMounted, reactive, ref } from 'vue';
 import { ElButton, ElInput, ElInputNumber, ElMessage, ElMessageBox, ElSwitch, ElTable, ElTableColumn, type FormInstance, type FormRules } from 'element-plus';
+import { useOutlineOptionStore } from '../stores/outlineOptionStore';
 import { usePromptStore } from '../stores/promptStore';
 import type { AiPrompt, AiPromptParameter, AiPromptRequest, PromptParameterDirection } from '../types/prompt';
 
 const promptStore = usePromptStore();
+const outlineOptionStore = useOutlineOptionStore();
 const formRef = ref<FormInstance>();
 const dialogVisible = ref(false);
 const editingId = ref<number | null>(null);
@@ -148,6 +233,11 @@ const filters = reactive<{
 });
 const form = reactive<AiPromptRequest>({
   promptKey: '',
+  promptScope: 'DEFAULT',
+  basePromptKey: '',
+  matchGenre: '',
+  matchStyle: '',
+  priority: 0,
   promptName: '',
   category: '',
   description: '',
@@ -172,6 +262,29 @@ const dialogTitle = computed(() => (editingId.value ? '编辑 Prompt' : '新增 
 const inputParameters = computed(() => form.parameters.filter((item) => item.direction === 'INPUT'));
 const outputParameters = computed(() => form.parameters.filter((item) => item.direction === 'OUTPUT'));
 const categoryOptions = computed(() => Array.from(new Set(promptStore.prompts.map((item) => item.category).filter(Boolean))) as string[]);
+const defaultPromptOptions = computed(() => promptStore.prompts.filter((prompt) => prompt.promptScope !== 'SPECIFIC'));
+const promptTree = computed(() => {
+  const defaultPrompts = defaultPromptOptions.value.map((prompt) => ({
+    ...prompt,
+    children: [] as AiPrompt[],
+  }));
+  const defaultByKey = new Map(defaultPrompts.map((prompt) => [prompt.promptKey, prompt]));
+  const orphanSpecificPrompts: AiPrompt[] = [];
+
+  for (const prompt of promptStore.prompts) {
+    if (prompt.promptScope !== 'SPECIFIC') {
+      continue;
+    }
+    const parent = defaultByKey.get(prompt.basePromptKey);
+    if (parent) {
+      parent.children?.push(prompt);
+    } else {
+      orphanSpecificPrompts.push(prompt);
+    }
+  }
+
+  return [...defaultPrompts, ...orphanSpecificPrompts];
+});
 
 const ParameterEditor = defineComponent({
   props: {
@@ -220,7 +333,12 @@ const ParameterEditor = defineComponent({
   },
 });
 
-onMounted(loadPrompts);
+onMounted(async () => {
+  await Promise.all([
+    loadPrompts(),
+    outlineOptionStore.fetchEnabledOptions(),
+  ]);
+});
 
 async function loadPrompts() {
   await promptStore.fetchPrompts({
@@ -236,10 +354,36 @@ function openCreateDialog() {
   dialogVisible.value = true;
 }
 
+function openCreateSpecificDialog(parent: AiPrompt) {
+  editingId.value = null;
+  form.promptKey = `${parent.promptKey}_specific`;
+  form.promptScope = 'SPECIFIC';
+  form.basePromptKey = parent.promptKey;
+  form.matchGenre = '';
+  form.matchStyle = '';
+  form.priority = 100;
+  form.promptName = `${parent.promptName} 特定 Prompt`;
+  form.category = parent.category || '';
+  form.description = parent.description || '';
+  form.templateContent = parent.templateContent;
+  form.enabled = true;
+  form.parameters = parent.parameters.map((parameter) => ({
+    ...parameter,
+    id: undefined,
+  }));
+  formRef.value?.clearValidate();
+  dialogVisible.value = true;
+}
+
 async function openEditDialog(id: number) {
   const prompt = await promptStore.fetchPrompt(id);
   editingId.value = prompt.id;
   form.promptKey = prompt.promptKey;
+  form.promptScope = prompt.promptScope || 'DEFAULT';
+  form.basePromptKey = prompt.basePromptKey || prompt.promptKey;
+  form.matchGenre = prompt.matchGenre || '';
+  form.matchStyle = prompt.matchStyle || '';
+  form.priority = prompt.priority || 0;
   form.promptName = prompt.promptName;
   form.category = prompt.category || '';
   form.description = prompt.description || '';
@@ -260,16 +404,25 @@ async function submitForm() {
   }
 
   const payload = normalizePayload();
-  if (editingId.value) {
-    await promptStore.updatePrompt(editingId.value, payload);
-    ElMessage.success('Prompt 已更新');
-  } else {
-    await promptStore.createPrompt(payload);
-    ElMessage.success('Prompt 已创建');
+  try {
+    if (editingId.value) {
+      await promptStore.updatePrompt(editingId.value, payload);
+      ElMessage.success('Prompt 已更新');
+    } else {
+      await promptStore.createPrompt(payload);
+      ElMessage.success('Prompt 已创建');
+    }
+
+    dialogVisible.value = false;
+  } catch {
+    return;
   }
 
-  dialogVisible.value = false;
-  await loadPrompts();
+  try {
+    await loadPrompts();
+  } catch {
+    ElMessage.warning('Prompt 已保存，但刷新列表超时，请稍后点击刷新确认。');
+  }
 }
 
 async function toggleEnabled(prompt: AiPrompt) {
@@ -277,6 +430,11 @@ async function toggleEnabled(prompt: AiPrompt) {
   try {
     await promptStore.updatePrompt(prompt.id, {
       promptKey: prompt.promptKey,
+      promptScope: prompt.promptScope,
+      basePromptKey: prompt.basePromptKey,
+      matchGenre: prompt.matchGenre || undefined,
+      matchStyle: prompt.matchStyle || undefined,
+      priority: prompt.priority || 0,
       promptName: prompt.promptName,
       category: prompt.category || undefined,
       description: prompt.description || undefined,
@@ -326,6 +484,14 @@ function removeParameter(parameter: AiPromptParameter) {
 }
 
 function validateParameters() {
+  if (form.promptScope === 'SPECIFIC' && !form.basePromptKey) {
+    ElMessage.warning('特定 Prompt 必须填写基础 Prompt Key');
+    return false;
+  }
+  if (form.promptScope === 'SPECIFIC' && !form.matchGenre && !form.matchStyle) {
+    ElMessage.warning('特定 Prompt 至少需要填写匹配题材或匹配风格');
+    return false;
+  }
   const invalid = form.parameters.find((parameter) => !parameter.paramKey || !parameter.paramName || !parameter.dataType);
   if (invalid) {
     ElMessage.warning('参数标识、参数名称和类型不能为空');
@@ -334,9 +500,28 @@ function validateParameters() {
   return true;
 }
 
+function handlePromptScopeChange() {
+  if (form.promptScope === 'DEFAULT') {
+    form.basePromptKey = form.promptKey;
+    form.matchGenre = '';
+    form.matchStyle = '';
+    return;
+  }
+
+  if (!form.basePromptKey && defaultPromptOptions.value.length > 0) {
+    form.basePromptKey = defaultPromptOptions.value[0].promptKey;
+  }
+}
+
 function normalizePayload(): AiPromptRequest {
+  const isDefault = form.promptScope !== 'SPECIFIC';
   return {
     promptKey: form.promptKey,
+    promptScope: isDefault ? 'DEFAULT' : 'SPECIFIC',
+    basePromptKey: isDefault ? form.promptKey : form.basePromptKey || form.promptKey,
+    matchGenre: isDefault ? undefined : form.matchGenre || undefined,
+    matchStyle: isDefault ? undefined : form.matchStyle || undefined,
+    priority: form.priority || 0,
     promptName: form.promptName,
     category: form.category || undefined,
     description: form.description || undefined,
@@ -357,6 +542,11 @@ function normalizePayload(): AiPromptRequest {
 
 function resetForm() {
   form.promptKey = '';
+  form.promptScope = 'DEFAULT';
+  form.basePromptKey = '';
+  form.matchGenre = '';
+  form.matchStyle = '';
+  form.priority = 0;
   form.promptName = '';
   form.category = '';
   form.description = '';
@@ -364,6 +554,17 @@ function resetForm() {
   form.enabled = true;
   form.parameters = [];
   formRef.value?.clearValidate();
+}
+
+function formatMatchCondition(prompt: AiPrompt) {
+  const parts = [];
+  if (prompt.matchGenre) {
+    parts.push(`题材=${prompt.matchGenre}`);
+  }
+  if (prompt.matchStyle) {
+    parts.push(`风格=${prompt.matchStyle}`);
+  }
+  return parts.length ? parts.join('，') : '未设置';
 }
 </script>
 
@@ -425,6 +626,10 @@ h1 {
 .prompt-editor :deep(textarea) {
   font-family: "JetBrains Mono", "Fira Code", Consolas, monospace;
   line-height: 1.6;
+}
+
+.muted-text {
+  color: #94a3b8;
 }
 
 .param-tabs {

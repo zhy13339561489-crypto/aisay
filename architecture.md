@@ -1236,6 +1236,41 @@ Python 读取策略如下：
 - 输入参数用于说明 PromptTemplate 需要哪些占位符；输出参数用于说明 `with_structured_output()` 或解析逻辑期望返回什么字段。
 - 禁用某个 Prompt 后，Python 查询不到启用记录，会回退到 `prompt.py`；如果希望完全阻断某个链路，需要在业务层单独做开关。
 
+#### 默认 Prompt 与特定 Prompt
+
+`ai_prompts` 支持两类记录：
+- `DEFAULT`：默认 Prompt。`prompt_key` 就是 Python 使用的基础 Key，例如 `generate_story_outline`；`base_prompt_key` 自动等于自身 `prompt_key`。
+- `SPECIFIC`：特定 Prompt。`prompt_key` 仍需全局唯一，但 `base_prompt_key` 指向默认 Prompt，例如 `generate_story_outline`；可通过 `match_genre` 和 `match_style` 限定只在某个题材或风格下使用。
+
+所有故事类大模型调用都会把当前漫剧的题材和漫剧风格传给 `prompt_repository`。生成剧情大纲使用用户在弹窗中选择的题材/风格；后续剧情修改、分卷、小节、资产、脚本和对话 Agent 都使用 `stories.genre` / `stories.style` 中已经保存的业务快照。查询顺序如下：
+- 优先查找 `base_prompt_key=当前基础 Key` 且 `prompt_scope=SPECIFIC` 的记录，例如剧情大纲是 `generate_story_outline`，分镜脚本是 `generate_section_script`。
+- 如果某条特定 Prompt 同时匹配题材和风格，它优先于只匹配一个条件的记录。
+- 如果存在多条同等匹配记录，`priority` 更高的优先。
+- 如果没有匹配特定 Prompt，则使用 `prompt_scope=DEFAULT` 的默认 Prompt。
+- 如果数据库不可用或没有默认记录，则回退到 `python-ai/prompt.py` 中的模板。
+
+上下文传递链路如下：
+- Java `StoryServiceImpl` 在投递 RabbitMQ 故事 AI 任务时，把 `Story.genre` 写入 `AiStoryTaskMessage.genre`，把 `Story.style` 写入 `AiStoryTaskMessage.storyStyle`。
+- Python `rabbitmq_worker` 将 `genre` / `storyStyle` 转换为各业务请求模型的 `genre` / `story_style`。
+- `story_ai_pkg` 中各业务模块调用 `load_prompt_template(prompt_key, genre=request.genre, story_style=request.story_style)`。
+- 对话系统由 `ChatServiceImpl` 在 `ChatAgentRequest` 中传入绑定漫剧的题材和风格，`chat_ai` 调用 `get_prompt_template("chat_agent", ..., genre=..., story_style=...)`。
+
+因此，特定 Prompt 不是只影响剧情大纲生成，而是会影响同一个基础 Key 对应的所有大模型入口。例如可以为 `generate_section_script` 新增“悬疑 + 黑白电影感”的特定 Prompt，让该题材和风格下的小节分镜脚本更偏向压迫感镜头语言；没有匹配时仍使用默认 `generate_section_script`。
+
+例如可以新增一条记录：
+- `prompt_key=generate_story_outline_scifi_guoman`
+- `base_prompt_key=generate_story_outline`
+- `prompt_scope=SPECIFIC`
+- `match_genre=科幻`
+- `match_style=国漫电影感`
+
+当用户生成剧情大纲时选择“科幻 + 国漫电影感”，Python 会使用这条特定 Prompt；后续该故事进行分卷、小节、资产、脚本或对话修改时，也会按故事保存的“科幻 + 国漫电影感”去匹配对应基础 Key 的特定 Prompt。如果某个基础 Key 没有对应特定 Prompt，则自动使用该基础 Key 的默认 Prompt。
+
+前端管理方式如下：
+- Prompt 管理页用树形表格展示，默认 Prompt 是父节点，特定 Prompt 是它的子节点。
+- 新增特定 Prompt 应从默认 Prompt 行点击“新增特定”，这样会自动继承 `basePromptKey`、分类、模板正文和参数详情。
+- `matchGenre` 和 `matchStyle` 不再手写，分别从“大纲配置”的启用题材和启用漫剧风格下拉选择，避免匹配值因为错别字或空格而失效。
+
 ### LLM 调用重试
 
 通义大模型调用有时会遇到远端提前关闭连接，例如 `RemoteDisconnected('Remote end closed connection without response')`。这类错误通常不是业务参数问题，而是上游 HTTP 连接的临时波动。Python 在 `ai_runtime.invoke_llm_with_retry` 中统一包裹 LangChain `.invoke()`，对临时网络/上游异常做最多 3 次指数退避重试。

@@ -99,13 +99,19 @@ def generate_volume_sections(
 
     # ── 第一阶段：规划小节数量 ──────────────────────────────────────────
     count_llm = llm_temperature_0.with_structured_output(VolumeSectionCountOutput)
-    count_chain = load_prompt_template("generate_volume_section_count") | count_llm
+    count_chain = load_prompt_template(
+        "generate_volume_section_count",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | count_llm
     log_progress(trace_id, "planning section count with temperature=0 structured output", started_at, scope)
 
     count_result = invoke_llm_with_retry(
         count_chain,
         {
             "Title": request.title,
+            "Theme": request.genre or "未指定",
+            "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
             "StorySummary": request.story_summary or "",
             "Outline": request.outline,
             "Characters": characters_text,
@@ -125,7 +131,11 @@ def generate_volume_sections(
 
     # ── 第二阶段：逐节生成故事细节 ──────────────────────────────────────
     # 使用流式文本 LLM，小节内容使用纯文本标签格式输出
-    section_chain = load_prompt_template("generate_volume_section_single") | streaming_text_llm_base
+    section_chain = load_prompt_template(
+        "generate_volume_section_single",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | streaming_text_llm_base
 
     # 存储已生成的小节列表
     generated_sections: list[VolumeSectionItem] = []
@@ -139,6 +149,7 @@ def generate_volume_sections(
             section_chain,
             {
                 "Title": request.title,
+                "Theme": request.genre or "未指定",
                 "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
                 "StorySummary": request.story_summary or "",
                 "Outline": request.outline,

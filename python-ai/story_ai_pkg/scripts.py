@@ -69,7 +69,11 @@ def generate_section_script(request: StorySectionScriptGenerateRequest) -> Story
     structured_llm = structured_llm_base.with_structured_output(StorySectionScriptGenerateResponse)
 
     # 构建链
-    chain = load_prompt_template("generate_section_script") | structured_llm
+    chain = load_prompt_template(
+        "generate_section_script",
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | structured_llm
     log_progress(trace_id, "structured section script chain created, invoking Tongyi model", started_at, scope)
 
     # 调用大模型
@@ -77,6 +81,7 @@ def generate_section_script(request: StorySectionScriptGenerateRequest) -> Story
         chain,
         {
             "Title": request.title,
+            "Theme": request.genre or "未指定",
             "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
             "StorySummary": request.story_summary or "",
             "Outline": request.outline or "",

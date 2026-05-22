@@ -21,6 +21,21 @@ public class AiPromptRequest {
     @Size(max = 100, message = "Prompt Key 长度不能超过 100 个字符")
     private String promptKey;
 
+    @Pattern(regexp = "DEFAULT|SPECIFIC", message = "Prompt 作用域只能是 DEFAULT 或 SPECIFIC")
+    private String promptScope;
+
+    @Pattern(regexp = "[A-Za-z0-9_.-]*", message = "基础 Prompt Key 只能包含字母、数字、下划线、点和短横线")
+    @Size(max = 100, message = "基础 Prompt Key 长度不能超过 100 个字符")
+    private String basePromptKey;
+
+    @Size(max = 100, message = "匹配题材长度不能超过 100 个字符")
+    private String matchGenre;
+
+    @Size(max = 100, message = "匹配风格长度不能超过 100 个字符")
+    private String matchStyle;
+
+    private Integer priority;
+
     @NotBlank(message = "Prompt 名称不能为空")
     @Size(max = 100, message = "Prompt 名称长度不能超过 100 个字符")
     private String promptName;

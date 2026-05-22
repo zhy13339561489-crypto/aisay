@@ -20,6 +20,16 @@ public class AiPrompt {
 
     private String promptKey;
 
+    private String basePromptKey;
+
+    private String promptScope;
+
+    private String matchGenre;
+
+    private String matchStyle;
+
+    private Integer priority;
+
     private String promptName;
 
     private String category;

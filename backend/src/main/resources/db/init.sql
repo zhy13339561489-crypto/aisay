@@ -253,6 +253,11 @@ ON DUPLICATE KEY UPDATE
 CREATE TABLE IF NOT EXISTS ai_prompts (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     prompt_key VARCHAR(100) NOT NULL,
+    base_prompt_key VARCHAR(100) NOT NULL DEFAULT '',
+    prompt_scope VARCHAR(20) NOT NULL DEFAULT 'DEFAULT',
+    match_genre VARCHAR(100),
+    match_style VARCHAR(100),
+    priority INT NOT NULL DEFAULT 0,
     prompt_name VARCHAR(100) NOT NULL,
     category VARCHAR(50),
     description VARCHAR(1000),
@@ -262,7 +267,9 @@ CREATE TABLE IF NOT EXISTS ai_prompts (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_ai_prompts_key (prompt_key),
     KEY idx_ai_prompts_category (category),
-    KEY idx_ai_prompts_enabled (enabled)
+    KEY idx_ai_prompts_enabled (enabled),
+    KEY idx_ai_prompts_base_scope (base_prompt_key, prompt_scope, enabled),
+    KEY idx_ai_prompts_match (base_prompt_key, match_genre, match_style)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ai_prompt_parameters (

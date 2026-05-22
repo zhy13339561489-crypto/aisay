@@ -44,6 +44,12 @@ class ChatAgentRequest(BaseModel):
     # 故事标题，用于 Agent 理解当前故事上下文
     title: str
 
+    # 当前漫剧题材，用于匹配特定 Prompt
+    genre: str | None = None
+
+    # 当前漫剧视觉风格，用于匹配特定 Prompt
+    story_style: str | None = Field(default=None, alias="storyStyle")
+
     # 故事摘要，可选，用于 Agent 理解故事背景
     synopsis: str | None = None
 
@@ -126,7 +132,12 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
     structured_llm = structured_llm_base.with_structured_output(ChatAgentOutput)
 
     # 构建 LangChain 链：提示词模板 → 结构化 LLM
-    chain = get_prompt_template("chat_agent", prompt_ChatAgent) | structured_llm
+    chain = get_prompt_template(
+        "chat_agent",
+        prompt_ChatAgent,
+        genre=request.genre,
+        story_style=request.story_style,
+    ) | structured_llm
 
     # 打印模型调用开始日志
     log_progress(trace_id, "rewriting question and routing to Java method in non-streaming mode", started_at, scope)
@@ -136,6 +147,8 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
         chain,
         {
             "Title": request.title,                        # 故事标题
+            "Theme": request.genre or "未指定",             # 当前题材
+            "StoryStyle": request.story_style or "未指定",  # 当前漫剧风格
             "StorySummary": request.synopsis or "",        # 故事摘要
             "Outline": request.outline or "",              # 故事大纲
             "UserMessage": request.user_message,           # 用户消息

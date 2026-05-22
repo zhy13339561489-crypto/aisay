@@ -36,8 +36,13 @@ public class AiPromptServiceImpl implements AiPromptService {
                 .and(keyword != null && !keyword.isBlank(), query -> query
                         .like(AiPrompt::getPromptKey, keyword.trim())
                         .or()
+                        .like(AiPrompt::getBasePromptKey, keyword.trim())
+                        .or()
                         .like(AiPrompt::getPromptName, keyword.trim()))
                 .orderByAsc(AiPrompt::getCategory)
+                .orderByAsc(AiPrompt::getBasePromptKey)
+                .orderByAsc(AiPrompt::getPromptScope)
+                .orderByDesc(AiPrompt::getPriority)
                 .orderByAsc(AiPrompt::getPromptKey);
         return aiPromptMapper.selectList(wrapper).stream()
                 .map(this::toResponseWithParameters)
@@ -111,7 +116,23 @@ public class AiPromptServiceImpl implements AiPromptService {
     }
 
     private void applyPromptFields(AiPrompt prompt, AiPromptRequest request, String promptKey) {
+        String promptScope = normalizePromptScope(request.getPromptScope());
+        String basePromptKey = normalizeBasePromptKey(promptKey, promptScope, request.getBasePromptKey());
+        String matchGenre = normalizeNullable(request.getMatchGenre());
+        String matchStyle = normalizeNullable(request.getMatchStyle());
+        if ("DEFAULT".equals(promptScope)) {
+            matchGenre = null;
+            matchStyle = null;
+        } else if (matchGenre == null && matchStyle == null) {
+            throw new IllegalArgumentException("特定 Prompt 至少需要设置题材或风格匹配条件");
+        }
+
         prompt.setPromptKey(promptKey);
+        prompt.setBasePromptKey(basePromptKey);
+        prompt.setPromptScope(promptScope);
+        prompt.setMatchGenre(matchGenre);
+        prompt.setMatchStyle(matchStyle);
+        prompt.setPriority(request.getPriority() == null ? 0 : request.getPriority());
         prompt.setPromptName(normalizeRequired(request.getPromptName(), "Prompt 名称不能为空"));
         prompt.setCategory(normalizeNullable(request.getCategory()));
         prompt.setDescription(normalizeNullable(request.getDescription()));
@@ -167,6 +188,11 @@ public class AiPromptServiceImpl implements AiPromptService {
         return new AiPromptResponse(
                 prompt.getId(),
                 prompt.getPromptKey(),
+                prompt.getBasePromptKey(),
+                prompt.getPromptScope(),
+                prompt.getMatchGenre(),
+                prompt.getMatchStyle(),
+                prompt.getPriority(),
                 prompt.getPromptName(),
                 prompt.getCategory(),
                 prompt.getDescription(),
@@ -206,5 +232,23 @@ public class AiPromptServiceImpl implements AiPromptService {
             return null;
         }
         return value.trim();
+    }
+
+    private String normalizePromptScope(String promptScope) {
+        if (promptScope == null || promptScope.isBlank()) {
+            return "DEFAULT";
+        }
+        String normalized = promptScope.trim().toUpperCase();
+        if (!"DEFAULT".equals(normalized) && !"SPECIFIC".equals(normalized)) {
+            throw new IllegalArgumentException("Prompt 作用域只能是 DEFAULT 或 SPECIFIC");
+        }
+        return normalized;
+    }
+
+    private String normalizeBasePromptKey(String promptKey, String promptScope, String basePromptKey) {
+        if ("DEFAULT".equals(promptScope)) {
+            return promptKey;
+        }
+        return normalizeRequired(basePromptKey, "特定 Prompt 必须指定基础 Prompt Key");
     }
 }

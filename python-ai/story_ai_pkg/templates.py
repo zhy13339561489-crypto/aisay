@@ -34,7 +34,7 @@ PROMPT_FALLBACKS = {
 }
 
 
-def load_prompt_template(prompt_key: str):
-    """按 prompt_key 从 MySQL 加载模板，数据库不可用时回退到 prompt.py。"""
+def load_prompt_template(prompt_key: str, *, genre: str | None = None, story_style: str | None = None):
+    """按 prompt_key 从 MySQL 加载模板，支持按题材/风格匹配特定 Prompt。"""
     fallback = PROMPT_FALLBACKS[prompt_key]
-    return get_prompt_template(prompt_key, fallback)
+    return get_prompt_template(prompt_key, fallback, genre=genre, story_style=story_style)
