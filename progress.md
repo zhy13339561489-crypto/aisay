@@ -1538,3 +1538,27 @@
 - [ ] 重启 Java 后端，让新增表映射、接口、RabbitMQ 任务类型和结果落库逻辑生效。
 - [ ] 重启 Python FastAPI，让 `SECTION_SCRIPT_GENERATE` worker 分支和脚本提示词生效。
 - [ ] 刷新前端故事详情页，进入已有小节后点击“生成故事脚本”；完成后小节下方应显示分镜脚本列表。
+
+## 2026-05-22 story_ai.py 拆分为软件包
+### 调整内容
+- [x] 将原本约 55KB 的 `python-ai/story_ai.py` 拆分到 `python-ai/story_ai_pkg/` 软件包中。
+- [x] `story_ai.py` 现在只保留兼容门面：`from story_ai_pkg import *`，因此 `main.py` 和 `rabbitmq_worker.py` 继续使用原来的 `from story_ai import ...` 导入方式。
+- [x] 新增 `story_ai_pkg/models.py`，集中存放故事、分卷、小节、资产、脚本相关 Pydantic 请求/响应模型。
+- [x] 新增 `story_ai_pkg/templates.py`，集中初始化 LangChain `PromptTemplate`。
+- [x] 新增 `story_ai_pkg/router.py`，集中提供 FastAPI `APIRouter` 实例。
+- [x] 新增 `story_ai_pkg/formatters.py`，存放角色/分卷/小节上下文格式化、LLM 文本提取和小节标签解析工具。
+- [x] 新增 `story_ai_pkg/outline.py`，承载剧情大纲生成和剧情大纲修改接口。
+- [x] 新增 `story_ai_pkg/volumes.py`，承载分卷大纲生成、分卷大纲修改和分卷正文生成接口。
+- [x] 新增 `story_ai_pkg/sections.py`，承载分卷小节生成接口与逐节生成逻辑。
+- [x] 新增 `story_ai_pkg/assets.py`，承载小节人物/场景资产识别、豆包图片生成和资产复用逻辑。
+- [x] 新增 `story_ai_pkg/scripts.py`，承载小节故事脚本生成接口。
+
+### 验证结果
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -B -c "import story_ai, rabbitmq_worker; print('python import ok')"`。
+- [x] FastAPI 路由检查成功，仍保留 `/api/story/outline`、`/api/story/outline/revise`、`/api/story/volume-outline`、`/api/story/volume-outline/revise`、`/api/story/volume-story`、`/api/story/volume-sections`、`/api/story/section-assets`、`/api/story/section-script`。
+- [x] Python 源码编译检查成功：逐个读取 `story_ai.py`、`rabbitmq_worker.py`、`main.py` 和 `story_ai_pkg/*.py` 后用 `compile(..., 'exec')` 校验通过。
+- [x] `compileall` 未作为最终验证依据：当前 Windows 环境里部分 `__pycache__/*.pyc` 被占用，写入缓存时报 `PermissionError`，但不写缓存的源码编译和实际导入均已通过。
+
+### 需要你做的事情
+- [ ] 重启 Python FastAPI，让新的 `story_ai_pkg` 包结构生效。
+- [ ] Java 后端和前端不需要因为这次拆分单独重启；如果你同时还没有应用上一节“小节故事脚本生成”的 Java/SQL 改动，则仍需按上一节要求执行 SQL 并重启 Java。

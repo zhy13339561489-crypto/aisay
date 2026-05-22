@@ -1138,3 +1138,20 @@ sequenceDiagram
 - `AiStoryTaskMessage.section`：提交任务时携带当前小节故事正文，避免 Python 再反查 Java。
 - `AiStoryTaskResultMessage.sectionScript`：Python 通过 RabbitMQ 回传结构化脚本，Java 负责最终落库。
 - `StoryDetailResponse.VolumeSectionItem.scripts`：前端展示小节脚本列表；`scriptTotalDurationSeconds` 用于显示 AI 自行决定的总时长。
+
+### Python Story AI 软件包拆分
+
+`python-ai/story_ai.py` 现在只作为兼容门面存在，负责把 `story_ai_pkg` 的公共对象重新导出。这样 `main.py` 中的 `from story_ai import router as story_router`、`rabbitmq_worker.py` 中的 `from story_ai import generate_story_outline ...` 都不需要改动，但实际实现已经拆成多个职责单一的模块。
+
+当前包结构如下：
+- `story_ai_pkg/models.py`：Pydantic 请求/响应模型，包括剧情大纲、分卷、小节、资产和脚本模型。
+- `story_ai_pkg/templates.py`：LangChain `PromptTemplate` 初始化，统一绑定 `prompt.py` 中的提示词。
+- `story_ai_pkg/router.py`：FastAPI `APIRouter` 单例，其他模块通过导入同一个 router 注册路由。
+- `story_ai_pkg/formatters.py`：角色、分卷、小节上下文格式化工具，以及普通文本 LLM 输出解析工具。
+- `story_ai_pkg/outline.py`：剧情大纲生成与剧情大纲修改。
+- `story_ai_pkg/volumes.py`：分卷大纲生成、分卷大纲修改、分卷正文生成。
+- `story_ai_pkg/sections.py`：分卷小节数量判断与逐节故事生成。
+- `story_ai_pkg/assets.py`：小节人物/场景识别、已有资产匹配、豆包图片生成和本地文件落地。
+- `story_ai_pkg/scripts.py`：小节故事脚本结构化生成。
+
+这个拆分让非对话 AI 能力仍然共享同一个 FastAPI router 和 RabbitMQ worker 入口，但每类能力的代码边界更清楚。后续如果继续增加视频生成、音频合成或镜头图片生成，建议新增独立模块，例如 `video.py` 或 `shot_images.py`，再由 `story_ai_pkg/__init__.py` 做公共导出。
