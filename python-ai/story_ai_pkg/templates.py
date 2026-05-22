@@ -1,12 +1,9 @@
 # 提示词模板初始化模块
-# 本文件集中初始化所有 LangChain PromptTemplate 实例。
-# PromptTemplate 将 prompt.py 中的原始字符串转为可调用的模板对象，
-# 在运行时通过 .invoke() 方法替换 {变量名} 占位符。
+# 本文件把 prompt_key 映射到 MySQL 中的模板内容。
+# Python 仅按 prompt_key 读取模板，Prompt 的新增、修改、删除都由 Java 后端处理。
+# prompt.py 仍作为数据库不可用或 SQL 未执行时的兼容兜底。
 
-# LangChain 提示词模板类
-from langchain_core.prompts import PromptTemplate
-
-# 从 prompt 模块导入所有原始提示词字符串
+# 从 prompt 模块导入所有原始提示词字符串，作为数据库兜底内容
 from prompt import (
     prompt_Outline,                  # 剧情大纲生成提示词
     prompt_ReviseOutline,            # 剧情大纲修改提示词
@@ -20,42 +17,24 @@ from prompt import (
     prompt_VolumeStory,              # 分卷正文生成提示词
 )
 
-# ── 剧情大纲相关模板 ──────────────────────────────────────────────────
+from .prompt_repository import get_prompt_template
 
-# 剧情大纲生成模板：输入 {Theme} 题材、{StoryStyle} 风格、{Plot} 剧情
-promptTemplate_Outline = PromptTemplate.from_template(prompt_Outline)
 
-# 剧情大纲修改模板：输入 {OriginalOutline} 原始大纲、{RevisionNotes} 修改意见
-promptTemplate_ReviseOutline = PromptTemplate.from_template(prompt_ReviseOutline)
+PROMPT_FALLBACKS = {
+    "generate_story_outline": prompt_Outline,
+    "revise_story_outline": prompt_ReviseOutline,
+    "generate_volume_count": prompt_VolumeCount,
+    "generate_volume_outline_single": prompt_VolumeOutlineSingle,
+    "revise_volume_outline": prompt_VolumeOutline_Editor,
+    "generate_volume_story": prompt_VolumeStory,
+    "generate_volume_section_count": prompt_VolumeSectionCount,
+    "generate_volume_section_single": prompt_VolumeSectionSingle,
+    "extract_section_assets": prompt_SectionAssetExtraction,
+    "generate_section_script": prompt_SectionScriptGenerate,
+}
 
-# ── 分卷大纲相关模板 ──────────────────────────────────────────────────
 
-# 分卷数量规划模板：输入 {Title}、{StorySummary}、{Outline}、{Characters}
-promptTemplate_VolumeCount = PromptTemplate.from_template(prompt_VolumeCount)
-
-# 单卷大纲生成模板：输入 {Title}、{StorySummary}、{Outline}、{Characters}、{TotalVolumes}、{CurrentVolumeNumber}、{GeneratedVolumeOutlines}
-promptTemplate_VolumeOutlineSingle = PromptTemplate.from_template(prompt_VolumeOutlineSingle)
-
-# 分卷大纲修改模板：输入 {Title}、{StorySummary}、{Outline}、{Characters}、{ExistingVolumeOutline}、{ModificationRequest}
-promptTemplate_VolumeOutlineEditor = PromptTemplate.from_template(prompt_VolumeOutline_Editor)
-
-# ── 小节相关模板 ──────────────────────────────────────────────────────
-
-# 小节数量规划模板：输入 {Title}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{VolumeSummary}、{VolumeContent}、{EndingHook}
-promptTemplate_VolumeSectionCount = PromptTemplate.from_template(prompt_VolumeSectionCount)
-
-# 单节故事生成模板：输入 {Title}、{StoryStyle}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{VolumeSummary}、{VolumeContent}、{EndingHook}、{TotalSections}、{CurrentSectionNumber}、{GeneratedSections}
-promptTemplate_VolumeSectionSingle = PromptTemplate.from_template(prompt_VolumeSectionSingle)
-
-# ── 分卷正文模板 ──────────────────────────────────────────────────────
-
-# 分卷正文生成模板：输入 {Title}、{StoryStyle}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{VolumeSummary}、{VolumeContent}、{EndingHook}
-promptTemplate_VolumeStory = PromptTemplate.from_template(prompt_VolumeStory)
-
-# ── 资产和脚本模板 ────────────────────────────────────────────────────
-
-# 小节资产识别模板：输入 {Title}、{StoryStyle}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{SectionNumber}、{SectionTitle}、{SectionSummary}、{SectionContent}、{ExistingAssets}
-promptTemplate_SectionAssetExtraction = PromptTemplate.from_template(prompt_SectionAssetExtraction)
-
-# 分镜脚本生成模板：输入 {Title}、{StoryStyle}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{VolumeSummary}、{VolumeContent}、{EndingHook}、{SectionNumber}、{SectionTitle}、{SectionSummary}、{SectionContent}、{SectionEndingHook}
-promptTemplate_SectionScriptGenerate = PromptTemplate.from_template(prompt_SectionScriptGenerate)
+def load_prompt_template(prompt_key: str):
+    """按 prompt_key 从 MySQL 加载模板，数据库不可用时回退到 prompt.py。"""
+    fallback = PROMPT_FALLBACKS[prompt_key]
+    return get_prompt_template(prompt_key, fallback)

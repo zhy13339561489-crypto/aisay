@@ -38,8 +38,8 @@ from .models import (
 # 从 router 导入路由器
 from .router import router
 
-# 从 templates 导入提示词模板
-from .templates import promptTemplate_VolumeSectionCount, promptTemplate_VolumeSectionSingle
+# 从 templates 导入提示词模板加载函数
+from .templates import load_prompt_template
 
 
 @router.post("/api/story/volume-sections", response_model=StoryVolumeSectionGenerateResponse)
@@ -99,7 +99,7 @@ def generate_volume_sections(
 
     # ── 第一阶段：规划小节数量 ──────────────────────────────────────────
     count_llm = llm_temperature_0.with_structured_output(VolumeSectionCountOutput)
-    count_chain = promptTemplate_VolumeSectionCount | count_llm
+    count_chain = load_prompt_template("generate_volume_section_count") | count_llm
     log_progress(trace_id, "planning section count with temperature=0 structured output", started_at, scope)
 
     count_result = count_chain.invoke(
@@ -121,7 +121,7 @@ def generate_volume_sections(
 
     # ── 第二阶段：逐节生成故事细节 ──────────────────────────────────────
     # 使用流式文本 LLM，小节内容使用纯文本标签格式输出
-    section_chain = promptTemplate_VolumeSectionSingle | streaming_text_llm_base
+    section_chain = load_prompt_template("generate_volume_section_single") | streaming_text_llm_base
 
     # 存储已生成的小节列表
     generated_sections: list[VolumeSectionItem] = []

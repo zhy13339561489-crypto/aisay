@@ -50,6 +50,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/OutlineOptionManageView.vue'),
       },
       {
+        path: 'prompts',
+        name: 'prompts',
+        component: () => import('../views/PromptManageView.vue'),
+      },
+      {
         path: 'story/:id',
         name: 'story-detail',
         component: () => import('../views/StoryDetailView.vue'),

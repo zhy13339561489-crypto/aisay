@@ -250,6 +250,42 @@ ON DUPLICATE KEY UPDATE
     sort_order = VALUES(sort_order),
     enabled = VALUES(enabled);
 
+CREATE TABLE IF NOT EXISTS ai_prompts (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    prompt_key VARCHAR(100) NOT NULL,
+    prompt_name VARCHAR(100) NOT NULL,
+    category VARCHAR(50),
+    description VARCHAR(1000),
+    template_content LONGTEXT NOT NULL,
+    enabled TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_ai_prompts_key (prompt_key),
+    KEY idx_ai_prompts_category (category),
+    KEY idx_ai_prompts_enabled (enabled)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ai_prompt_parameters (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    prompt_id BIGINT NOT NULL,
+    direction VARCHAR(20) NOT NULL,
+    param_key VARCHAR(100) NOT NULL,
+    param_name VARCHAR(100) NOT NULL,
+    data_type VARCHAR(50) NOT NULL,
+    required_flag TINYINT(1) NOT NULL DEFAULT 1,
+    description VARCHAR(1000),
+    example_value VARCHAR(1000),
+    sort_order INT NOT NULL DEFAULT 0,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uk_ai_prompt_param (prompt_id, direction, param_key),
+    KEY idx_ai_prompt_parameters_prompt_id (prompt_id),
+    KEY idx_ai_prompt_parameters_direction (direction),
+    CONSTRAINT fk_ai_prompt_parameters_prompt
+        FOREIGN KEY (prompt_id) REFERENCES ai_prompts(id)
+        ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS scenes (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     story_id BIGINT NOT NULL,

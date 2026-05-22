@@ -26,8 +26,8 @@ from .models import (
 # 从 router 导入路由器，用于注册端点
 from .router import router
 
-# 从 templates 导入提示词模板
-from .templates import promptTemplate_Outline, promptTemplate_ReviseOutline
+# 从 templates 导入提示词模板加载函数
+from .templates import load_prompt_template
 
 
 @router.post("/api/story/outline", response_model=StoryOutlineGenerateResponse)
@@ -59,7 +59,7 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
     structured_llm = structured_llm_base.with_structured_output(NovelOutlineOutput)
 
     # 构建 LangChain 链：提示词模板 → 结构化 LLM
-    chain = promptTemplate_Outline | structured_llm
+    chain = load_prompt_template("generate_story_outline") | structured_llm
 
     # 打印链创建完成日志
     log_progress(trace_id, "structured chain created, invoking Tongyi model in non-streaming mode", started_at)
@@ -136,7 +136,7 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
     structured_llm = structured_llm_base.with_structured_output(OutlineRevisionOutput)
 
     # 构建 LangChain 链
-    chain = promptTemplate_ReviseOutline | structured_llm
+    chain = load_prompt_template("revise_story_outline") | structured_llm
 
     # 打印链创建日志
     log_progress(trace_id, "structured revision chain created, invoking Tongyi model in non-streaming mode", started_at, scope)

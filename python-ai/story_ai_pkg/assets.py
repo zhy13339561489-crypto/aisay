@@ -45,8 +45,8 @@ from .models import (
 # 从 router 导入路由器
 from .router import router
 
-# 从 templates 导入提示词模板
-from .templates import promptTemplate_SectionAssetExtraction
+# 从 templates 导入提示词模板加载函数
+from .templates import load_prompt_template
 
 
 def normalize_asset_key(asset_type: str, name: str) -> str:
@@ -526,7 +526,7 @@ def resolve_section_assets(
     """
     # 创建结构化输出 LLM，绑定 SectionAssetExtractionOutput 模型
     extraction_llm = llm_temperature_0.with_structured_output(SectionAssetExtractionOutput)
-    extraction_chain = promptTemplate_SectionAssetExtraction | extraction_llm
+    extraction_chain = load_prompt_template("extract_section_assets") | extraction_llm
 
     # 打印识别开始日志
     log_progress(trace_id, f"extracting assets for section {section.section_number}", started_at, scope)

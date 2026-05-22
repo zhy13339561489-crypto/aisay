@@ -37,13 +37,8 @@ from .models import (
 # 从 router 导入路由器
 from .router import router
 
-# 从 templates 导入提示词模板
-from .templates import (
-    promptTemplate_VolumeCount,              # 分卷数量规划模板
-    promptTemplate_VolumeOutlineEditor,      # 分卷大纲修改模板
-    promptTemplate_VolumeOutlineSingle,      # 单卷大纲生成模板
-    promptTemplate_VolumeStory,              # 分卷正文生成模板
-)
+# 从 templates 导入提示词模板加载函数
+from .templates import load_prompt_template
 
 
 @router.post("/api/story/volume-outline", response_model=StoryVolumeOutlineGenerateResponse)
@@ -87,7 +82,7 @@ def generate_volume_outline(
     # ── 第一阶段：规划总分卷数 ──────────────────────────────────────────
     # 使用温度为 0 的模型，输出最确定性的分卷数量
     count_llm = llm_temperature_0.with_structured_output(VolumeCountOutput)
-    count_chain = promptTemplate_VolumeCount | count_llm
+    count_chain = load_prompt_template("generate_volume_count") | count_llm
     log_progress(trace_id, "planning total volume count with temperature=0 structured output", started_at, scope)
 
     count_result = count_chain.invoke(
@@ -105,7 +100,7 @@ def generate_volume_outline(
     # ── 第二阶段：逐卷生成详细大纲 ──────────────────────────────────────
     # 创建单卷生成 LLM，绑定 VolumeOutlineItem 模型
     single_volume_llm = structured_llm_base.with_structured_output(VolumeOutlineItem)
-    single_volume_chain = promptTemplate_VolumeOutlineSingle | single_volume_llm
+    single_volume_chain = load_prompt_template("generate_volume_outline_single") | single_volume_llm
 
     # 存储已生成的分卷列表
     generated_volumes: list[VolumeOutlineItem] = []
@@ -199,7 +194,7 @@ def revise_volume_outline(request: StoryVolumeOutlineReviseRequest) -> StoryVolu
     structured_llm = structured_llm_base.with_structured_output(VolumeOutlineOutput)
 
     # 构建链
-    chain = promptTemplate_VolumeOutlineEditor | structured_llm
+    chain = load_prompt_template("revise_volume_outline") | structured_llm
     log_progress(trace_id, "structured volume revision chain created, invoking Tongyi model in non-streaming mode", started_at, scope)
 
     # 调用大模型
@@ -261,7 +256,7 @@ def generate_volume_story(request: StoryVolumeStoryGenerateRequest) -> StoryVolu
     )
 
     # 构建链：提示词模板 → LLM（纯文本输出）
-    chain = promptTemplate_VolumeStory | structured_llm_base
+    chain = load_prompt_template("generate_volume_story") | structured_llm_base
     log_progress(trace_id, "plain text volume story chain created, invoking Tongyi model", started_at, scope)
 
     # 调用大模型

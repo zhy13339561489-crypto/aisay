@@ -1188,3 +1188,50 @@ sequenceDiagram
 - `ChatView`：打开生成剧情大纲弹窗时加载已启用配置，并允许用户临时手动输入未配置的题材或风格。
 
 这个拆分的好处是配置维护可以快速迭代，不需要重启或修改 AI 提示词；同时故事记录保留字符串快照，后续删除或改名配置项不会破坏历史故事数据。
+
+### Prompt 管理模块
+
+Prompt 管理把原来写死在 `python-ai/prompt.py` 中的模板迁移到 MySQL。Java 后端负责管理页面和 CRUD，Python 运行时只通过 `pymysql` 按 `prompt_key` 只读获取启用模板，并把模板作为 LangChain 参数使用；`prompt.py` 暂时保留为兜底，避免数据库未初始化时 AI 服务直接启动失败。
+
+```mermaid
+sequenceDiagram
+    participant View as PromptManageView
+    participant Java as AiPromptController
+    participant DB as MySQL ai_prompts
+    participant Python as prompt_repository
+    participant LLM as LangChain Chain
+
+    View->>Java: GET/POST/PUT/DELETE /api/prompts
+    Java->>DB: 管理 Prompt 模板和参数详情
+    Python->>DB: 只读 SELECT template_content WHERE prompt_key=? AND enabled=1
+    DB-->>Python: Prompt 模板正文
+    Python->>LLM: PromptTemplate.from_template(template)
+```
+
+数据职责如下：
+- `ai_prompts`：保存 Prompt 主体信息，包括 `prompt_key`、名称、分类、说明、模板正文和启用状态。
+- `ai_prompt_parameters`：保存每个 Prompt 的输入参数和输出参数说明，包括参数标识、名称、类型、是否必填、说明和示例。
+- `prompt_key`：Python 与数据库之间的稳定契约，例如 `generate_story_outline`、`generate_section_script`、`chat_agent`。
+- `python-ai/prompt.py`：兼容兜底文件；数据库不可用时 Python 会回退到这里，保证现有服务不断。
+
+当前已纳入数据库管理的 Prompt 包括：
+- `generate_story_outline`：输入 `Theme`、`StoryStyle`、`Plot`；输出 `novel_name`、`story_summary`、`outline`、`main_characters`。
+- `revise_story_outline`：根据原始大纲和修改意见重写故事大纲。
+- `generate_volume_count` 和 `generate_volume_outline_single`：两阶段生成分卷大纲。
+- `revise_volume_outline`：自动修改分卷大纲。
+- `generate_volume_story`：生成分卷正文。
+- `generate_volume_section_count` 和 `generate_volume_section_single`：两阶段生成分卷小节。
+- `extract_section_assets`：识别小节人物和场景资产。
+- `generate_section_script`：生成小节分镜脚本。
+- `chat_agent`：对话系统的问题重写和 Java 方法路由。
+
+Python 读取策略如下：
+- 每次构建链路时通过 `load_prompt_template(prompt_key)` 获取模板。
+- `prompt_repository` 对每个 `prompt_key` 做 30 秒内存缓存，降低 MySQL 查询频率。
+- 如果未安装 `pymysql`、SQL 未执行、MySQL 连接失败或该 `prompt_key` 没有启用记录，则打印 fallback 日志并使用 `prompt.py` 中的原始模板。
+- Python 不包含 Prompt 新增、修改、删除逻辑，也不暴露 Prompt 管理接口；这些能力只存在于 Java 的 `/api/prompts`。
+
+维护规则如下：
+- 修改模板正文时必须保留 Python 调用时传入的 `{变量名}`，否则 LangChain 渲染会因为缺少变量而报错。
+- 输入参数用于说明 PromptTemplate 需要哪些占位符；输出参数用于说明 `with_structured_output()` 或解析逻辑期望返回什么字段。
+- 禁用某个 Prompt 后，Python 查询不到启用记录，会回退到 `prompt.py`；如果希望完全阻断某个链路，需要在业务层单独做开关。

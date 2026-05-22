@@ -1593,3 +1593,45 @@
 - [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260522_create_story_outline_options.sql`。
 - [ ] 重启 Java 后端，让新增配置表映射和 `/api/story-outline-options` 接口生效。
 - [ ] 重新打开前端，进入“大纲配置”维护题材/漫剧风格；之后“生成剧情大纲”弹窗会加载已启用配置。
+
+## 2026-05-22 Prompt 管理模块
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260522_create_ai_prompts.sql`，创建 `ai_prompts` 和 `ai_prompt_parameters` 两张表。
+- [x] `ai_prompts` 保存 `prompt_key`、名称、分类、说明、模板正文和启用状态。
+- [x] `ai_prompt_parameters` 保存每个 Prompt 的输入/输出参数详情，包括方向、参数标识、参数名称、类型、是否必填、说明、示例和排序。
+- [x] SQL 已从当前 `python-ai/prompt.py` 自动生成，预置 11 个 Prompt 和 116 条输入/输出参数说明。
+- [x] `generate_story_outline` 已明确记录输入参数 `Theme`、`StoryStyle`、`Plot`，输出参数 `novel_name`、`story_summary`、`outline`、`main_characters`。
+
+### 后端
+- [x] 新增 `AiPrompt`、`AiPromptParameter` 实体和对应 Mapper。
+- [x] 新增 Prompt 请求/响应 DTO，支持携带参数详情整体保存。
+- [x] 新增 `AiPromptService` 和实现类，支持列表查询、详情、新增、编辑、启停和删除。
+- [x] 新增接口 `/api/prompts`，由 Java 后端完成 Prompt 管理，不调用 Python 和 RabbitMQ。
+- [x] `init.sql` 已包含 Prompt 表结构，独立 SQL 文件包含完整表结构和默认数据。
+
+### Python
+- [x] 新增 `story_ai_pkg/prompt_repository.py`，运行时按 `prompt_key` 使用 `pymysql` 从 MySQL 只读获取启用 Prompt。
+- [x] Python Prompt 读取采用 30 秒内存缓存，避免每次链路重复查库。
+- [x] 保留 `prompt.py` 作为兜底：SQL 未执行、MySQL 不可用或 `pymysql` 未安装时，不会阻断服务启动，会回退到原文件中的 Prompt。
+- [x] 已将剧情大纲、分卷、小节、资产识别、分镜脚本和对话 Agent 的 Prompt 调用改为按 `prompt_key` 动态加载。
+- [x] `requirements.txt` 已增加 `pymysql>=1.1.0`。
+- [x] Python 不提供 Prompt 新增、修改、删除接口，也不写入 `ai_prompts` / `ai_prompt_parameters`；管理逻辑全部在 Java 后端。
+
+### 前端
+- [x] 新增 `promptApi.ts`、`promptStore.ts` 和 `prompt.ts` 类型定义。
+- [x] 新增 Prompt 管理页面 `/prompts`，顶部导航显示“Prompt 管理”。
+- [x] 页面支持搜索、按分类筛选、按启用状态筛选、刷新、新增、编辑、启停和删除。
+- [x] 编辑弹窗支持维护 Prompt 模板正文，并分别维护“输入参数”和“输出参数”明细。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml -q compile`。
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -B -c "import story_ai, chat_ai; print('python import ok')"`。
+- [x] 前端构建成功：`npm run build`。
+- [x] 前端构建仍有 Sass legacy JS API、Rollup 注释和大 chunk 警告，属于既有非阻断警告。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260522_create_ai_prompts.sql`。
+- [ ] 在 `python-ai` 虚拟环境中安装新增依赖：`.\venv\Scripts\pip.exe install -r requirements.txt`。
+- [ ] 重启 Java 后端，让 `/api/prompts` 接口生效。
+- [ ] 重启 Python FastAPI / RabbitMQ worker，让 Python 从 MySQL 读取 Prompt；如果 MySQL 不可用，会临时回退到 `prompt.py`。
+- [ ] 重新打开前端，点击顶部导航“Prompt 管理”或访问 `/prompts`。

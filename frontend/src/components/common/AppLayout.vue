@@ -13,6 +13,7 @@
         <RouterLink to="/chat">对话</RouterLink>
         <RouterLink to="/stories">漫剧列表</RouterLink>
         <RouterLink to="/outline-options">大纲配置</RouterLink>
+        <RouterLink to="/prompts">Prompt 管理</RouterLink>
       </nav>
 
       <el-dropdown trigger="click" @command="handleUserCommand">

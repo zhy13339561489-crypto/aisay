@@ -13,22 +13,17 @@ from typing import Any
 
 # FastAPI 工具导入
 from fastapi import APIRouter                    # APIRouter：用于组织路由，最终挂载到主 app
-from langchain_core.prompts import PromptTemplate # PromptTemplate：LangChain 提示词模板
 from pydantic import BaseModel, Field             # BaseModel/Field：Pydantic 数据模型定义
 
 # 从 ai_runtime 导入共享的 LLM 实例和工具函数
 from ai_runtime import ConsoleStreamingCallback, log_progress, structured_llm_base
 
-# 从 prompt 模块导入对话 Agent 提示词
 from prompt import prompt_ChatAgent
+from story_ai_pkg.prompt_repository import get_prompt_template
 
 
 # 创建对话 Agent 路由器，最终在 main.py 中挂载到 app
 router = APIRouter()
-
-# 初始化对话 Agent 提示词模板，将 prompt_ChatAgent 字符串转为可调用的模板对象
-promptTemplate_ChatAgent = PromptTemplate.from_template(prompt_ChatAgent)
-
 
 class ChatAgentRequest(BaseModel):
     """对话 Agent 请求体。
@@ -131,7 +126,7 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
     structured_llm = structured_llm_base.with_structured_output(ChatAgentOutput)
 
     # 构建 LangChain 链：提示词模板 → 结构化 LLM
-    chain = promptTemplate_ChatAgent | structured_llm
+    chain = get_prompt_template("chat_agent", prompt_ChatAgent) | structured_llm
 
     # 打印模型调用开始日志
     log_progress(trace_id, "rewriting question and routing to Java method in non-streaming mode", started_at, scope)

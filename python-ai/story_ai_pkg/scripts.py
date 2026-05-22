@@ -24,8 +24,8 @@ from .models import StorySectionScriptGenerateRequest, StorySectionScriptGenerat
 # 从 router 导入路由器
 from .router import router
 
-# 从 templates 导入提示词模板
-from .templates import promptTemplate_SectionScriptGenerate
+# 从 templates 导入提示词模板加载函数
+from .templates import load_prompt_template
 
 
 @router.post("/api/story/section-script", response_model=StorySectionScriptGenerateResponse)
@@ -69,7 +69,7 @@ def generate_section_script(request: StorySectionScriptGenerateRequest) -> Story
     structured_llm = structured_llm_base.with_structured_output(StorySectionScriptGenerateResponse)
 
     # 构建链
-    chain = promptTemplate_SectionScriptGenerate | structured_llm
+    chain = load_prompt_template("generate_section_script") | structured_llm
     log_progress(trace_id, "structured section script chain created, invoking Tongyi model", started_at, scope)
 
     # 调用大模型
