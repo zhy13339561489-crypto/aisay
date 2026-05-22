@@ -8,6 +8,9 @@ import os
 # time：用于计算请求耗时，打印进度日志
 import time
 
+# random：用于给重试等待增加轻微抖动，避免并发请求同时重试
+import random
+
 # pathlib.Path：用于定位 api.yml 配置文件路径
 from pathlib import Path
 
@@ -19,6 +22,22 @@ from langchain_community.chat_models import ChatTongyi
 
 # BaseCallbackHandler：LangChain 回调基类，用于监听大模型调用的生命周期事件
 from langchain_core.callbacks import BaseCallbackHandler
+
+
+LLM_RETRYABLE_ERROR_MARKERS = (
+    "RemoteDisconnected",
+    "Connection aborted",
+    "Connection reset",
+    "Connection refused",
+    "Read timed out",
+    "Timeout",
+    "timed out",
+    "Max retries exceeded",
+    "temporarily unavailable",
+    "502",
+    "503",
+    "504",
+)
 
 
 def load_api_config() -> dict:
@@ -239,3 +258,61 @@ def log_progress(trace_id: str, message: str, started_at: float, scope: str = "s
 
     # 打印格式：[scope][trace_id][耗时] 消息内容
     print(f"[{scope}][{trace_id}][{elapsed:.1f}s] {message}", flush=True)
+
+
+def invoke_llm_with_retry(
+    chain,
+    payload: dict,
+    *,
+    config: dict | None = None,
+    trace_id: str = "-",
+    started_at: float | None = None,
+    scope: str = "llm",
+    max_attempts: int = 3,
+    base_delay_seconds: float = 2.0,
+):
+    """Invoke a LangChain chain with retry for transient upstream/network errors.
+
+    Args:
+        chain:              LangChain runnable chain.
+        payload:            Prompt variables passed to .invoke().
+        config:             Optional LangChain invoke config.
+        trace_id:           Request trace id used in logs.
+        started_at:         Request start time. If omitted, a new timer is used.
+        scope:              Business scope used in logs.
+        max_attempts:       Maximum total attempts, including the first one.
+        base_delay_seconds: Initial retry delay before exponential backoff.
+
+    Returns:
+        The chain.invoke(...) result.
+
+    Raises:
+        Exception: Re-raises the last exception when it is not retryable or retries are exhausted.
+    """
+    timer = started_at if started_at is not None else time.perf_counter()
+    attempt = 1
+
+    while True:
+        try:
+            if attempt > 1:
+                log_progress(trace_id, f"llm retry attempt {attempt}/{max_attempts} started", timer, scope)
+            return chain.invoke(payload, config=config)
+        except Exception as exc:
+            if attempt >= max_attempts or not is_retryable_llm_error(exc):
+                raise
+
+            delay = base_delay_seconds * (2 ** (attempt - 1)) + random.uniform(0, 0.8)
+            log_progress(
+                trace_id,
+                f"llm transient error, retrying in {delay:.1f}s ({attempt}/{max_attempts}): {exc}",
+                timer,
+                scope,
+            )
+            time.sleep(delay)
+            attempt += 1
+
+
+def is_retryable_llm_error(error: Exception) -> bool:
+    """Return True when an LLM exception looks like a transient network/upstream failure."""
+    message = repr(error)
+    return any(marker in message for marker in LLM_RETRYABLE_ERROR_MARKERS)

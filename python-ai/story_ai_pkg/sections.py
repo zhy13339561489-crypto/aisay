@@ -17,7 +17,7 @@ from collections.abc import Callable
 from fastapi import HTTPException
 
 # 从 ai_runtime 导入共享的 LLM 实例和工具函数
-from ai_runtime import ConsoleStreamingCallback, llm_temperature_0, log_progress, streaming_text_llm_base
+from ai_runtime import ConsoleStreamingCallback, invoke_llm_with_retry, llm_temperature_0, log_progress, streaming_text_llm_base
 
 # 从 formatters 导入文本格式化工具
 from .formatters import (
@@ -102,7 +102,8 @@ def generate_volume_sections(
     count_chain = load_prompt_template("generate_volume_section_count") | count_llm
     log_progress(trace_id, "planning section count with temperature=0 structured output", started_at, scope)
 
-    count_result = count_chain.invoke(
+    count_result = invoke_llm_with_retry(
+        count_chain,
         {
             "Title": request.title,
             "StorySummary": request.story_summary or "",
@@ -115,6 +116,9 @@ def generate_volume_sections(
             "EndingHook": request.volume_outline.ending_hook or "",
         },
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+        trace_id=trace_id,
+        started_at=started_at,
+        scope=scope,
     )
     total_sections = count_result.section_count
     log_progress(trace_id, f"section count planned: {total_sections}", started_at, scope)
@@ -131,7 +135,8 @@ def generate_volume_sections(
         log_progress(trace_id, f"generating section {section_number}/{total_sections}", started_at, scope)
 
         # 调用大模型生成当前节（纯文本输出）
-        raw_section = section_chain.invoke(
+        raw_section = invoke_llm_with_retry(
+            section_chain,
             {
                 "Title": request.title,
                 "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
@@ -149,6 +154,9 @@ def generate_volume_sections(
                 "GeneratedSections": format_volume_section_context(generated_sections),
             },
             config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+            trace_id=trace_id,
+            started_at=started_at,
+            scope=scope,
         )
 
         # 从纯文本响应中提取并解析小节结构

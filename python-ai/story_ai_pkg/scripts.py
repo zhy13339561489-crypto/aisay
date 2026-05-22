@@ -13,7 +13,7 @@ import uuid
 from fastapi import HTTPException
 
 # 从 ai_runtime 导入共享的 LLM 实例和工具函数
-from ai_runtime import ConsoleStreamingCallback, log_progress, structured_llm_base
+from ai_runtime import ConsoleStreamingCallback, invoke_llm_with_retry, log_progress, structured_llm_base
 
 # 从 formatters 导入角色设定格式化函数
 from .formatters import build_characters_text
@@ -73,7 +73,8 @@ def generate_section_script(request: StorySectionScriptGenerateRequest) -> Story
     log_progress(trace_id, "structured section script chain created, invoking Tongyi model", started_at, scope)
 
     # 调用大模型
-    result = chain.invoke(
+    result = invoke_llm_with_retry(
+        chain,
         {
             "Title": request.title,
             "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
@@ -92,6 +93,9 @@ def generate_section_script(request: StorySectionScriptGenerateRequest) -> Story
             "SectionEndingHook": request.section.ending_hook or "",
         },
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+        trace_id=trace_id,
+        started_at=started_at,
+        scope=scope,
     )
 
     # 校验是否有分镜结果

@@ -1635,3 +1635,23 @@
 - [ ] 重启 Java 后端，让 `/api/prompts` 接口生效。
 - [ ] 重启 Python FastAPI / RabbitMQ worker，让 Python 从 MySQL 读取 Prompt；如果 MySQL 不可用，会临时回退到 `prompt.py`。
 - [ ] 重新打开前端，点击顶部导航“Prompt 管理”或访问 `/prompts`。
+
+## 2026-05-22 LLM 偶发连接中断重试
+### 问题现象
+- [x] Python 控制台偶发出现 `llm error: ('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))`。
+- [x] 该错误属于上游大模型 HTTP 连接被远端提前关闭，通常是临时网络或服务端连接波动，所以同一个接口有时成功、有时报错。
+
+### 调整内容
+- [x] 在 `python-ai/ai_runtime.py` 新增 `invoke_llm_with_retry`，统一封装 LangChain `.invoke()` 调用。
+- [x] 只对疑似临时网络/上游异常做重试，包括 `RemoteDisconnected`、`Connection aborted`、`Connection reset`、`Read timed out`、`502/503/504` 等。
+- [x] 默认最多尝试 3 次，等待时间使用指数退避并加轻微随机抖动，避免并发任务同时重试。
+- [x] 控制台会打印 `llm transient error, retrying...` 和 `llm retry attempt...`，方便确认是否触发了自动重试。
+- [x] 剧情大纲、剧情大纲修改、分卷数量、逐卷生成、分卷修改、分卷正文、小节数量、逐节生成、资产识别、小节脚本和对话 Agent 都已切换到统一重试封装。
+
+### 验证结果
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -B -c "import story_ai, chat_ai, ai_runtime; print('python import ok')"`。
+- [x] 检查 Python 代码中除重试封装内部外，已无业务侧裸 `.invoke()` 调用。
+
+### 需要你做的事情
+- [ ] 重启 Python FastAPI / RabbitMQ worker，让 LLM 自动重试逻辑生效。
+- [ ] 如果 3 次重试后仍失败，说明上游服务当时不可用或网络持续异常，需要稍后重试任务。

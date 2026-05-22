@@ -1235,3 +1235,24 @@ Python 读取策略如下：
 - 修改模板正文时必须保留 Python 调用时传入的 `{变量名}`，否则 LangChain 渲染会因为缺少变量而报错。
 - 输入参数用于说明 PromptTemplate 需要哪些占位符；输出参数用于说明 `with_structured_output()` 或解析逻辑期望返回什么字段。
 - 禁用某个 Prompt 后，Python 查询不到启用记录，会回退到 `prompt.py`；如果希望完全阻断某个链路，需要在业务层单独做开关。
+
+### LLM 调用重试
+
+通义大模型调用有时会遇到远端提前关闭连接，例如 `RemoteDisconnected('Remote end closed connection without response')`。这类错误通常不是业务参数问题，而是上游 HTTP 连接的临时波动。Python 在 `ai_runtime.invoke_llm_with_retry` 中统一包裹 LangChain `.invoke()`，对临时网络/上游异常做最多 3 次指数退避重试。
+
+```mermaid
+sequenceDiagram
+    participant Biz as story_ai/chat_ai
+    participant Runtime as invoke_llm_with_retry
+    participant LLM as Tongyi API
+
+    Biz->>Runtime: chain + prompt payload
+    Runtime->>LLM: invoke attempt 1
+    LLM--xRuntime: RemoteDisconnected / timeout / 5xx
+    Runtime->>Runtime: 判断为可重试异常，等待退避时间
+    Runtime->>LLM: invoke attempt 2/3
+    LLM-->>Runtime: 正常响应
+    Runtime-->>Biz: 返回 LLM 结果
+```
+
+当前重试只覆盖看起来像临时连接或上游服务异常的错误，例如连接中断、超时、连接重置、502、503、504。Prompt 变量缺失、结构化输出解析失败、业务校验失败等非临时错误不会被静默吞掉，仍会直接抛出，便于定位真实问题。

@@ -11,7 +11,7 @@ import time
 import uuid
 
 # 从 ai_runtime 导入共享的 LLM 实例和工具函数
-from ai_runtime import ConsoleStreamingCallback, log_progress, structured_llm_base
+from ai_runtime import ConsoleStreamingCallback, invoke_llm_with_retry, log_progress, structured_llm_base
 
 # 从 models 导入请求/响应/输出模型
 from .models import (
@@ -65,7 +65,8 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
     log_progress(trace_id, "structured chain created, invoking Tongyi model in non-streaming mode", started_at)
 
     # 调用大模型，传入提示词变量
-    result = chain.invoke(
+    result = invoke_llm_with_retry(
+        chain,
         {
             "Theme": request.genre,                                              # 题材
             "StoryStyle": request.story_style or "未指定，按题材自然推导",       # 漫剧风格
@@ -73,6 +74,9 @@ def generate_story_outline(request: StoryOutlineGenerateRequest) -> StoryOutline
         },
         # 传入控制台回调，打印调用进度
         config={"callbacks": [ConsoleStreamingCallback(trace_id)]},
+        trace_id=trace_id,
+        started_at=started_at,
+        scope="story-outline",
     )
 
     # 打印模型返回日志
@@ -142,12 +146,16 @@ def revise_story_outline(request: StoryOutlineReviseRequest) -> StoryOutlineRevi
     log_progress(trace_id, "structured revision chain created, invoking Tongyi model in non-streaming mode", started_at, scope)
 
     # 调用大模型
-    result = chain.invoke(
+    result = invoke_llm_with_retry(
+        chain,
         {
             "OriginalOutline": original_outline,   # 原始大纲文本
             "RevisionNotes": request.suggestion,   # 用户修改意见
         },
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+        trace_id=trace_id,
+        started_at=started_at,
+        scope=scope,
     )
 
     # 打印模型返回日志

@@ -16,7 +16,7 @@ from fastapi import APIRouter                    # APIRouter：用于组织路�
 from pydantic import BaseModel, Field             # BaseModel/Field：Pydantic 数据模型定义
 
 # 从 ai_runtime 导入共享的 LLM 实例和工具函数
-from ai_runtime import ConsoleStreamingCallback, log_progress, structured_llm_base
+from ai_runtime import ConsoleStreamingCallback, invoke_llm_with_retry, log_progress, structured_llm_base
 
 from prompt import prompt_ChatAgent
 from story_ai_pkg.prompt_repository import get_prompt_template
@@ -132,7 +132,8 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
     log_progress(trace_id, "rewriting question and routing to Java method in non-streaming mode", started_at, scope)
 
     # 调用大模型，传入故事上下文和用户消息
-    result = chain.invoke(
+    result = invoke_llm_with_retry(
+        chain,
         {
             "Title": request.title,                        # 故事标题
             "StorySummary": request.synopsis or "",        # 故事摘要
@@ -141,6 +142,9 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
         },
         # 传入控制台回调，打印流式 token（如果模型支持）
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+        trace_id=trace_id,
+        started_at=started_at,
+        scope=scope,
     )
 
     # 打印模型返回的方法名和路由
