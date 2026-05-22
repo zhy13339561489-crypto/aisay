@@ -1,6 +1,14 @@
 # 提示词统一管理
+# 本文件集中存放所有大模型提示词模板，供 story_ai 和 chat_ai 模块使用。
+# 每个提示词都定义了大模型的角色、任务、输入变量和输出格式要求。
+# 变量使用 {变量名} 占位符，由 LangChain PromptTemplate 在运行时替换。
 
 
+# ── 1. 剧情大纲生成提示词 ──────────────────────────────────────────────
+# 用途：根据用户输入的题材和可选剧情，生成完整的剧情大纲
+# 调用方：story_ai.generate_story_outline
+# 输入变量：{Theme} 题材、{StoryStyle} 漫剧风格、{Plot} 可选剧情
+# 输出：基础设定、主角设定、主线剧情、分卷规划、配角群像、核心卖点
 prompt_Outline = """
 你是一位资深的小说编辑与剧情架构师，拥有15年网络文学与出版小说编辑经验，擅长构建世界观、设计人物弧光、铺设悬念与伏笔。你熟悉玄幻、仙侠、科幻、都市、悬疑、历史、言情、末日、无限流等所有主流网文题材的创作规律。
 
@@ -56,6 +64,11 @@ prompt_Outline = """
 请严格按上述格式输出。如果用户提供了"部分剧情"，请将其无缝融入大纲并补全前后逻辑；如果未提供，则基于题材自行创作最具潜力的剧情方向。确保大纲足够详细，作者可直接据此开始写作。
 """
 
+# ── 2. 剧情大纲修改提示词 ──────────────────────────────────────────────
+# 用途：根据用户修改意见，重写现有剧情大纲
+# 调用方：story_ai.revise_story_outline
+# 输入变量：{OriginalOutline} 原始大纲、{RevisionNotes} 修改意见
+# 输出：修改后的故事摘要、大纲和角色设定
 prompt_ReviseOutline = """
 你是一位资深的小说编辑与剧情架构师，拥有15年网络文学与出版小说编辑经验，擅长诊断剧情漏洞、重构叙事节奏、优化人物弧光与悬念铺设。你熟悉玄幻、仙侠、科幻、都市、悬疑、历史、言情、末日、无限流等所有主流网文题材的创作规律。
 
@@ -110,6 +123,10 @@ prompt_ReviseOutline = """
 请严格按上述格式输出。如果用户的修改意见与原有设定存在冲突，优先执行修改意见，但必须在"连锁影响分析"中标注冲突点及你的解决方案。确保修改后的大纲逻辑闭环、节奏稳健、可直接投入创作。
 """
 
+# ── 3. 分卷大纲生成提示词（旧版一次性生成，当前未使用）────────────────
+# 用途：一次性生成全部分卷大纲（已被两阶段生成替代）
+# 调用方：无（保留供参考）
+# 输入变量：{Title} 书名、{StorySummary} 摘要、{Outline} 大纲、{Characters} 角色
 prompt_VolumeOutline = """
 你是一位资深的网络小说编辑与故事架构师，擅长设计超长篇连载的宏大叙事结构。你的任务是根据已有故事梗概、主线大纲及人物设定，创作一份极尽详实的分卷大纲。该大纲必须服务于"超长篇、高密度、多线并进"的创作目标，让作者拿到后即可直接展开正文，且具备连载数百章乃至上千章的骨架潜力。
 
@@ -284,6 +301,11 @@ prompt_VolumeOutline = """
 （依此类推，逐卷输出，直至完成所有分卷）
 """
 
+# ── 4. 分卷数量规划提示词 ──────────────────────────────────────────────
+# 用途：让温度为 0 的模型判断故事应拆分为多少个分卷
+# 调用方：story_ai.generate_volume_outline（第一阶段）
+# 输入变量：{Title} 书名、{StorySummary} 摘要、{Outline} 大纲、{Characters} 角色
+# 输出：volume_count 整数，范围 5-20
 prompt_VolumeCount = """
 你是一位长篇网文结构编辑，负责在生成分卷大纲前判断故事应该拆成多少个分卷。
 
@@ -303,6 +325,11 @@ prompt_VolumeCount = """
 6. 输出会被结构化模型约束，请确保 volume_count 是最终分卷总数。
 """
 
+# ── 5. 单卷大纲生成提示词 ──────────────────────────────────────────────
+# 用途：逐卷生成详细分卷大纲，每卷包含丰富的情节点、冲突和反转
+# 调用方：story_ai.generate_volume_outline（第二阶段循环调用）
+# 输入变量：{Title}、{StorySummary}、{Outline}、{Characters}、{TotalVolumes}、{CurrentVolumeNumber}、{GeneratedVolumeOutlines}
+# 输出：单卷 VolumeOutlineItem 结构
 prompt_VolumeOutlineSingle = """
 你是一位资深长篇网文编辑与分卷架构师。现在不要一次性输出所有分卷，只生成当前指定的一卷。
 
@@ -350,6 +377,11 @@ prompt_VolumeOutlineSingle = """
 """
 
 
+# ── 6. 分卷大纲修改提示词 ──────────────────────────────────────────────
+# 用途：根据用户修改意见自动重写分卷大纲
+# 调用方：story_ai.revise_volume_outline
+# 输入变量：{Title}、{StorySummary}、{Outline}、{Characters}、{ExistingVolumeOutline}、{ModificationRequest}
+# 输出：修改后的 VolumeOutlineOutput 结构
 prompt_VolumeOutline_Editor = """
 你是一位资深网络小说编辑与故事架构修复专家，擅长诊断长篇连载大纲的结构性病灶，并进行外科手术式的精准修改。你的任务是根据作者提供的现有分卷大纲、修改需求及故事基础设定，输出一份修复后的详尽分卷大纲。
 
@@ -554,6 +586,11 @@ prompt_VolumeOutline_Editor = """
 （继续输出完整修改后内容，直至完成所有指定修改卷）
 """
 
+# ── 7. 分卷正文生成提示词 ──────────────────────────────────────────────
+# 用途：根据分卷大纲生成该卷的详细完整故事正文
+# 调用方：story_ai.generate_volume_story
+# 输入变量：{Title}、{StoryStyle}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{VolumeSummary}、{VolumeContent}、{EndingHook}
+# 输出：纯文本故事正文（不使用结构化输出）
 prompt_VolumeStory = """
 你是一位擅长长篇网文正文创作的小说作者。现在请根据某一卷的分卷大纲，生成这一卷的详细完整故事正文,正文要尽可能的详细细致，正文要多。
 
@@ -587,6 +624,11 @@ prompt_VolumeStory = """
 - 正文应尽可能细致，包含场景描写、人物行动、对话、心理变化、冲突过程和因果承接。
 """
 
+# ── 8. 小节数量规划提示词 ──────────────────────────────────────────────
+# 用途：让温度为 0 的模型判断某一卷应拆分为多少个小节
+# 调用方：story_ai.generate_volume_sections（第一阶段）
+# 输入变量：{Title}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{VolumeSummary}、{VolumeContent}、{EndingHook}
+# 输出：section_count 整数，范围 4-12
 prompt_VolumeSectionCount = """
 你是一位长篇网文编辑，负责把某一卷分卷大纲拆成适合逐节创作的小节数量。
 
@@ -610,6 +652,11 @@ prompt_VolumeSectionCount = """
 5. 小节数量要服务于剧情推进，不要机械拆分。
 """
 
+# ── 9. 单节故事生成提示词 ──────────────────────────────────────────────
+# 用途：逐节生成具体故事细节，使用 XML 标签包裹输出避免 JSON 转义问题
+# 调用方：story_ai.generate_volume_sections（第二阶段循环调用）
+# 输入变量：{Title}、{StoryStyle}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{VolumeSummary}、{VolumeContent}、{EndingHook}、{TotalSections}、{CurrentSectionNumber}、{GeneratedSections}
+# 输出：纯文本，使用 <title>、<summary>、<content>、<endingHook> 标签包裹
 prompt_VolumeSectionSingle = """
 你是一位擅长长篇网文正文创作的小说作者。现在不要一次性输出整卷，只生成当前指定小节的具体故事细节。
 
@@ -652,6 +699,11 @@ prompt_VolumeSectionSingle = """
 3. 只输出当前这一节，当前小节号是第 {CurrentSectionNumber} 节。
 """
 
+# ── 10. 小节资产识别提示词 ──────────────────────────────────────────────
+# 用途：从小节故事内容中识别出现的人物和场景，判断是否首次出现
+# 调用方：story_ai.resolve_section_assets
+# 输入变量：{Title}、{StoryStyle}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{SectionNumber}、{SectionTitle}、{SectionSummary}、{SectionContent}、{ExistingAssets}
+# 输出：SectionAssetExtractionOutput 结构，包含 characters 和 scenes 列表
 prompt_SectionAssetExtraction = """
 你是一位漫剧资产统筹，负责从单个小节故事细节中识别本节实际出现的人物和场景。
 
@@ -690,6 +742,11 @@ prompt_SectionAssetExtraction = """
 """
 
 
+# ── 11. 分镜脚本生成提示词 ──────────────────────────────────────────────
+# 用途：根据小节故事生成镜头级分镜脚本，包含景别、运镜、动作、对白
+# 调用方：story_ai.generate_section_script
+# 输入变量：{Title}、{StoryStyle}、{StorySummary}、{Outline}、{Characters}、{VolumeNumber}、{VolumeTitle}、{VolumeSummary}、{VolumeContent}、{EndingHook}、{SectionNumber}、{SectionTitle}、{SectionSummary}、{SectionContent}、{SectionEndingHook}
+# 输出：StorySectionScriptGenerateResponse 结构，包含 shots 列表
 prompt_SectionScriptGenerate = """
 你是一名漫剧导演、分镜师和短剧编剧。现在请根据单个小节故事，生成可直接用于后续视频制作的故事脚本。
 
@@ -727,6 +784,11 @@ prompt_SectionScriptGenerate = """
 """
 
 
+# ── 12. 对话 Agent 提示词 ──────────────────────────────────────────────
+# 用途：理解用户聊天意图，重写问题并路由到对应的 Java 方法
+# 调用方：chat_ai.run_chat_agent
+# 输入变量：{Title} 书名、{StorySummary} 摘要、{Outline} 大纲、{UserMessage} 用户消息
+# 输出：ChatAgentOutput 结构，包含 rewrittenQuestion、route、javaMethod、javaMethodArgs、assistantMessage
 prompt_ChatAgent = """
 你是路由与工具调用代理（Routing & Tool-Calling Agent）。  
 你运行在对话会话中，该会话已绑定到一个具体的故事项目。你的职责是：理解用户的聊天意图，将其转化为明确的指令，并决定调用哪条链路。
