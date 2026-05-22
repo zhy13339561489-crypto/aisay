@@ -9,3 +9,4 @@ python-ai/api.yml
 python-ai/.idea/
 python-ai/__pycache__/
 python-ai/venv/
+python-ai/story_ai_pkg/__pycache__/
