@@ -20,13 +20,17 @@ export interface LoginResponse {
   token: string;
   userId: number;
   username: string;
+  role: UserRole;
 }
+
+export type UserRole = 'ROOT' | 'ADMIN' | 'USER';
 
 export interface UserProfileResponse {
   id: number;
   username: string;
   email: string;
   avatarPath?: string;
+  role: UserRole;
   createdAt: string;
 }
 
@@ -34,4 +38,18 @@ export interface UserUpdateRequest {
   username?: string;
   email?: string;
   avatarPath?: string;
+}
+
+export interface UserManageResponse {
+  id: number;
+  username: string;
+  email: string;
+  avatarPath?: string;
+  role: UserRole;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface UserRoleUpdateRequest {
+  role: UserRole;
 }

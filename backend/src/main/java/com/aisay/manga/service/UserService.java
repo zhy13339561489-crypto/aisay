@@ -2,9 +2,13 @@ package com.aisay.manga.service;
 
 import com.aisay.manga.dto.request.LoginRequest;
 import com.aisay.manga.dto.request.RegisterRequest;
+import com.aisay.manga.dto.request.UserRoleUpdateRequest;
 import com.aisay.manga.dto.request.UserUpdateRequest;
 import com.aisay.manga.dto.response.LoginResponse;
+import com.aisay.manga.dto.response.UserManageResponse;
 import com.aisay.manga.dto.response.UserProfileResponse;
+
+import java.util.List;
 
 public interface UserService {
 
@@ -31,4 +35,16 @@ public interface UserService {
      * 调用方：UserController#updateProfile。
      */
     UserProfileResponse updateProfile(Long userId, UserUpdateRequest request);
+
+    /**
+     * 作用：root 查询所有用户及权限等级。
+     * 调用方：UserController#listUsers。
+     */
+    List<UserManageResponse> listUsers(Long operatorUserId);
+
+    /**
+     * 作用：root 修改其他用户的权限等级。
+     * 调用方：UserController#updateUserRole。
+     */
+    UserManageResponse updateUserRole(Long operatorUserId, Long targetUserId, UserRoleUpdateRequest request);
 }

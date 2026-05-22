@@ -2,19 +2,24 @@ package com.aisay.manga.controller;
 
 import com.aisay.manga.dto.request.LoginRequest;
 import com.aisay.manga.dto.request.RegisterRequest;
+import com.aisay.manga.dto.request.UserRoleUpdateRequest;
 import com.aisay.manga.dto.request.UserUpdateRequest;
 import com.aisay.manga.dto.response.ApiResponse;
 import com.aisay.manga.dto.response.LoginResponse;
+import com.aisay.manga.dto.response.UserManageResponse;
 import com.aisay.manga.dto.response.UserProfileResponse;
 import com.aisay.manga.service.UserService;
 import com.aisay.manga.utils.SecurityUtils;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api")
@@ -64,5 +69,26 @@ public class UserController {
     @PutMapping("/user/profile")
     public ApiResponse<UserProfileResponse> updateProfile(@Valid @RequestBody UserUpdateRequest request) {
         return ApiResponse.success("更新成功", userService.updateProfile(SecurityUtils.getCurrentUserId(), request));
+    }
+
+    /**
+     * 作用：root 查询用户权限列表。
+     * 调用方：前端用户权限管理页面。
+     */
+    @GetMapping("/users")
+    public ApiResponse<List<UserManageResponse>> listUsers() {
+        return ApiResponse.success(userService.listUsers(SecurityUtils.getCurrentUserId()));
+    }
+
+    /**
+     * 作用：root 修改其他用户权限等级。
+     * 调用方：前端用户权限管理页面。
+     */
+    @PutMapping("/users/{id}/role")
+    public ApiResponse<UserManageResponse> updateUserRole(
+            @PathVariable Long id,
+            @Valid @RequestBody UserRoleUpdateRequest request
+    ) {
+        return ApiResponse.success("权限已更新", userService.updateUserRole(SecurityUtils.getCurrentUserId(), id, request));
     }
 }

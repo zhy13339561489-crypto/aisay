@@ -1,7 +1,7 @@
 import { computed, ref } from 'vue';
 import { defineStore } from 'pinia';
 import * as authApi from '../api/authApi';
-import type { RegisterRequest, UserProfileResponse, UserUpdateRequest } from '../types/auth';
+import type { RegisterRequest, UserManageResponse, UserProfileResponse, UserRole, UserUpdateRequest } from '../types/auth';
 
 function readStoredUser() {
   const rawUser = localStorage.getItem('userInfo');
@@ -30,6 +30,11 @@ export const useUserStore = defineStore('user', () => {
   const token = ref(localStorage.getItem('token') || '');
   const userInfo = ref<UserProfileResponse | null>(readStoredUser());
   const isLoggedIn = computed(() => Boolean(token.value));
+  const role = computed<UserRole>(() => userInfo.value?.role || 'USER');
+  const isRoot = computed(() => role.value === 'ROOT');
+  const canManageSystemConfig = computed(() => role.value === 'ROOT' || role.value === 'ADMIN');
+  const users = ref<UserManageResponse[]>([]);
+  const isUserLoading = ref(false);
 
   function persistToken(nextToken: string) {
     token.value = nextToken;
@@ -53,6 +58,7 @@ export const useUserStore = defineStore('user', () => {
       id: loginResult.userId,
       username: loginResult.username,
       email: '',
+      role: loginResult.role || 'USER',
       createdAt: '',
     });
 
@@ -85,6 +91,22 @@ export const useUserStore = defineStore('user', () => {
     return profile;
   }
 
+  async function fetchUsers() {
+    isUserLoading.value = true;
+    try {
+      users.value = await authApi.getUsers();
+      return users.value;
+    } finally {
+      isUserLoading.value = false;
+    }
+  }
+
+  async function updateUserRole(id: number, nextRole: UserRole) {
+    const updated = await authApi.updateUserRole(id, { role: nextRole });
+    users.value = users.value.map((user) => (user.id === updated.id ? updated : user));
+    return updated;
+  }
+
   function logout() {
     token.value = '';
     userInfo.value = null;
@@ -96,10 +118,17 @@ export const useUserStore = defineStore('user', () => {
     token,
     userInfo,
     isLoggedIn,
+    role,
+    isRoot,
+    canManageSystemConfig,
+    users,
+    isUserLoading,
     login,
     register,
     fetchProfile,
     updateProfile,
+    fetchUsers,
+    updateUserRole,
     logout,
   };
 });

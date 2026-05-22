@@ -29,6 +29,8 @@ public class User {
 
     private String avatarPath;
 
+    private String role;
+
     @TableField(typeHandler = JacksonTypeHandler.class)
     private Map<String, Object> preferences;
 

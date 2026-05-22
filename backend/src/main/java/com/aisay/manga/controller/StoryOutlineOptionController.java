@@ -3,7 +3,9 @@ package com.aisay.manga.controller;
 import com.aisay.manga.dto.request.StoryOutlineOptionRequest;
 import com.aisay.manga.dto.response.ApiResponse;
 import com.aisay.manga.dto.response.StoryOutlineOptionResponse;
+import com.aisay.manga.service.PermissionService;
 import com.aisay.manga.service.StoryOutlineOptionService;
+import com.aisay.manga.utils.SecurityUtils;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -25,6 +27,8 @@ public class StoryOutlineOptionController {
 
     private final StoryOutlineOptionService storyOutlineOptionService;
 
+    private final PermissionService permissionService;
+
     /**
      * 作用：查询生成剧情大纲可选的题材和漫剧风格。
      * 调用方：前端生成剧情大纲弹窗、前端大纲配置管理页。
@@ -43,6 +47,7 @@ public class StoryOutlineOptionController {
      */
     @PostMapping
     public ApiResponse<StoryOutlineOptionResponse> createOption(@Valid @RequestBody StoryOutlineOptionRequest request) {
+        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
         return ApiResponse.success("配置项已创建", storyOutlineOptionService.createOption(request));
     }
 
@@ -55,6 +60,7 @@ public class StoryOutlineOptionController {
             @PathVariable Long id,
             @Valid @RequestBody StoryOutlineOptionRequest request
     ) {
+        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
         return ApiResponse.success("配置项已更新", storyOutlineOptionService.updateOption(id, request));
     }
 
@@ -64,6 +70,7 @@ public class StoryOutlineOptionController {
      */
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteOption(@PathVariable Long id) {
+        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
         storyOutlineOptionService.deleteOption(id);
         return ApiResponse.success("配置项已删除", null);
     }

@@ -23,12 +23,14 @@ CREATE TABLE IF NOT EXISTS users (
     email VARCHAR(100) NOT NULL,
     password_hash VARCHAR(255) NOT NULL,
     avatar_path VARCHAR(500),
+    role VARCHAR(20) NOT NULL DEFAULT 'USER',
     preferences JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     UNIQUE KEY uk_users_username (username),
     UNIQUE KEY uk_users_email (email),
-    KEY idx_users_email (email)
+    KEY idx_users_email (email),
+    KEY idx_users_role (role)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS chat_sessions (

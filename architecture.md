@@ -1291,3 +1291,38 @@ sequenceDiagram
 ```
 
 当前重试只覆盖看起来像临时连接或上游服务异常的错误，例如连接中断、超时、连接重置、502、503、504。Prompt 变量缺失、结构化输出解析失败、业务校验失败等非临时错误不会被静默吞掉，仍会直接抛出，便于定位真实问题。
+
+### 用户权限模块
+
+系统权限分为三档：`ROOT`、`ADMIN`、`USER`。角色存储在 `users.role` 字段中，注册用户默认为 `USER`。后端在敏感接口执行时实时读取数据库角色做权限判断，不只依赖前端隐藏入口或 JWT 中的登录状态。
+
+```mermaid
+flowchart LR
+    Login["登录 /api/auth/login"] --> Profile["用户资料 userInfo.role"]
+    Profile --> Nav["前端导航按角色显示"]
+    Nav --> Chat["对话"]
+    Nav --> Stories["漫剧列表"]
+    Nav --> Config["大纲配置"]
+    Nav --> Prompt["Prompt 管理"]
+    Nav --> Users["用户权限"]
+    Config --> GuardA["后端 ROOT/ADMIN 校验"]
+    Prompt --> GuardA
+    Users --> GuardR["后端 ROOT 校验"]
+```
+
+权限规则如下：
+- `ROOT`：拥有全部权限，可以访问对话、漫剧列表、大纲配置、Prompt 管理和用户权限管理，并可以设置其他用户的权限等级。
+- `ADMIN`：可以访问对话、漫剧列表、大纲配置和 Prompt 管理，不能设置其他用户权限。
+- `USER`：可以访问对话和漫剧列表，不能进入大纲配置、Prompt 管理和用户权限管理。
+
+后端职责如下：
+- `PermissionService`：集中提供 `requireRoot` 和 `requireAdminOrRoot`，敏感 Controller 在执行业务前调用。
+- `UserService`：提供 root 专用的用户列表和角色修改能力，并禁止 root 修改自己的权限等级，避免误降权后失去管理入口。
+- `StoryOutlineOptionController`：查询启用题材/风格仍可服务普通创作流程；新增、修改、删除配置需要 `ROOT/ADMIN`。
+- `AiPromptController`：Prompt 管理属于系统级配置，列表、详情、新增、修改、删除都需要 `ROOT/ADMIN`。
+
+前端职责如下：
+- `userStore`：保存当前用户角色，并提供 `isRoot`、`canManageSystemConfig` 供导航和页面使用。
+- `AppLayout`：按角色显示导航入口，没有权限的管理入口不展示。
+- `router`：为 `/outline-options`、`/prompts`、`/users` 添加路由守卫，避免直接输入 URL 进入无权限页面。
+- `UserManageView`：root 专用页面，用于查看用户列表并设置其他用户为 `ROOT`、`ADMIN` 或 `USER`。

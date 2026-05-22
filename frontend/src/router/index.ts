@@ -48,11 +48,25 @@ const routes: RouteRecordRaw[] = [
         path: 'outline-options',
         name: 'outline-options',
         component: () => import('../views/OutlineOptionManageView.vue'),
+        meta: {
+          adminOrRoot: true,
+        },
       },
       {
         path: 'prompts',
         name: 'prompts',
         component: () => import('../views/PromptManageView.vue'),
+        meta: {
+          adminOrRoot: true,
+        },
+      },
+      {
+        path: 'users',
+        name: 'users',
+        component: () => import('../views/UserManageView.vue'),
+        meta: {
+          rootOnly: true,
+        },
       },
       {
         path: 'story/:id',
@@ -91,6 +105,14 @@ router.beforeEach((to) => {
   }
 
   if (to.meta.guestOnly && token) {
+    return '/chat';
+  }
+
+  if (to.meta.rootOnly && getStoredUserRole() !== 'ROOT') {
+    return '/chat';
+  }
+
+  if (to.meta.adminOrRoot && !isAdminOrRoot(getStoredUserRole())) {
     return '/chat';
   }
 
@@ -140,4 +162,22 @@ function normalizeBase64Url(value: string) {
   const normalized = value.replace(/-/g, '+').replace(/_/g, '/');
   const paddingLength = (4 - (normalized.length % 4)) % 4;
   return normalized + '='.repeat(paddingLength);
+}
+
+function getStoredUserRole() {
+  const rawUser = localStorage.getItem('userInfo');
+  if (!rawUser) {
+    return 'USER';
+  }
+
+  try {
+    const parsed = JSON.parse(rawUser) as { role?: string };
+    return parsed.role || 'USER';
+  } catch {
+    return 'USER';
+  }
+}
+
+function isAdminOrRoot(role: string) {
+  return role === 'ROOT' || role === 'ADMIN';
 }

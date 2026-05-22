@@ -1731,3 +1731,29 @@
 
 ### 需要你做的事情
 - [ ] 重启或刷新前端开发服务后，再保存一次特定 Prompt 验证提示是否正常。
+
+## 2026-05-22 用户权限管理
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260522_add_user_roles.sql`，为 `users` 表增加 `role` 字段和索引。
+- [x] `init.sql` 已同步 `users.role`，新环境默认普通用户为 `USER`。
+- [x] 迁移 SQL 会把用户名为 `root` 的账号设置为 `ROOT`；如果你的 root 账号不是这个用户名，需要手动更新对应用户的 `role='ROOT'`。
+
+### 后端
+- [x] 用户角色分为 `ROOT`、`ADMIN`、`USER` 三种。
+- [x] 注册用户默认角色为 `USER`，登录和用户资料接口会返回角色。
+- [x] 新增用户权限管理接口：`GET /api/users` 和 `PUT /api/users/{id}/role`，仅 `ROOT` 可用。
+- [x] `ROOT` 可以设置其他用户权限等级，不能修改自己的权限等级。
+- [x] 大纲配置新增、修改、删除需要 `ROOT` 或 `ADMIN`。
+- [x] Prompt 管理所有接口需要 `ROOT` 或 `ADMIN`。
+- [x] 对话和漫剧列表仍对所有登录用户开放。
+
+### 前端
+- [x] 顶部导航按权限显示入口：所有用户显示“对话、漫剧列表”；`ROOT/ADMIN` 显示“大纲配置、Prompt 管理”；`ROOT` 额外显示“用户权限”。
+- [x] 新增用户权限页面 `/users`，root 可以查看用户列表并调整其他用户角色。
+- [x] 路由守卫会阻止普通用户直接访问大纲配置、Prompt 管理和用户权限页面。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260522_add_user_roles.sql`。
+- [ ] 如果 root 账号用户名不是 `root`，请执行类似 SQL：`UPDATE users SET role='ROOT' WHERE username='你的root用户名';`。
+- [ ] 重启 Java 后端和前端开发服务。
+- [ ] 用 root 登录后进入“用户权限”，为需要管理 Prompt/大纲配置的用户设置 `ADMIN`。

@@ -12,14 +12,16 @@
       <nav class="nav-links" aria-label="主导航">
         <RouterLink to="/chat">对话</RouterLink>
         <RouterLink to="/stories">漫剧列表</RouterLink>
-        <RouterLink to="/outline-options">大纲配置</RouterLink>
-        <RouterLink to="/prompts">Prompt 管理</RouterLink>
+        <RouterLink v-if="canManageSystemConfig" to="/outline-options">大纲配置</RouterLink>
+        <RouterLink v-if="canManageSystemConfig" to="/prompts">Prompt 管理</RouterLink>
+        <RouterLink v-if="userStore.isRoot" to="/users">用户权限</RouterLink>
       </nav>
 
       <el-dropdown trigger="click" @command="handleUserCommand">
         <button class="user-menu" type="button">
           <span class="avatar">{{ usernameInitial }}</span>
           <span class="username">{{ username }}</span>
+          <span class="role-badge">{{ roleLabel }}</span>
         </button>
         <template #dropdown>
           <el-dropdown-menu>
@@ -37,7 +39,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
 import { useUserStore } from '../../stores/userStore';
 
@@ -47,6 +49,22 @@ const userStore = useUserStore();
 const username = computed(() => userStore.userInfo?.username || '创作者');
 
 const usernameInitial = computed(() => username.value.slice(0, 1).toUpperCase());
+const canManageSystemConfig = computed(() => userStore.canManageSystemConfig);
+const roleLabel = computed(() => {
+  if (userStore.role === 'ROOT') {
+    return 'root';
+  }
+  if (userStore.role === 'ADMIN') {
+    return 'admin';
+  }
+  return '普通用户';
+});
+
+onMounted(() => {
+  userStore.fetchProfile().catch(() => {
+    // 资料刷新失败时仍保留当前页面，由请求拦截器统一处理 401。
+  });
+});
 
 function handleUserCommand(command: string) {
   if (command === 'profile') {
@@ -159,6 +177,15 @@ function handleUserCommand(command: string) {
   background: #f97316;
 }
 
+.role-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  color: #0f766e;
+  font-size: 12px;
+  font-weight: 800;
+  background: rgba(15, 118, 110, 0.1);
+}
+
 .content-panel {
   max-width: 1180px;
   margin: 0 auto;
@@ -187,6 +214,10 @@ function handleUserCommand(command: string) {
   }
 
   .username {
+    display: none;
+  }
+
+  .role-badge {
     display: none;
   }
 }

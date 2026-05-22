@@ -5,6 +5,8 @@ import type {
   LoginResponse,
   RegisterRequest,
   UserProfileResponse,
+  UserManageResponse,
+  UserRoleUpdateRequest,
   UserUpdateRequest,
 } from '../types/auth';
 
@@ -29,5 +31,15 @@ export async function getProfile() {
 
 export async function updateProfile(data: UserUpdateRequest) {
   const response = await request.put<ApiResponse<UserProfileResponse>>('/api/user/profile', data);
+  return unwrap(response.data);
+}
+
+export async function getUsers() {
+  const response = await request.get<ApiResponse<UserManageResponse[]>>('/api/users');
+  return unwrap(response.data);
+}
+
+export async function updateUserRole(id: number, data: UserRoleUpdateRequest) {
+  const response = await request.put<ApiResponse<UserManageResponse>>(`/api/users/${id}/role`, data);
   return unwrap(response.data);
 }

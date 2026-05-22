@@ -1,9 +1,12 @@
 package com.aisay.manga.service.impl;
 
+import com.aisay.manga.config.UserRoles;
 import com.aisay.manga.dto.request.LoginRequest;
 import com.aisay.manga.dto.request.RegisterRequest;
+import com.aisay.manga.dto.request.UserRoleUpdateRequest;
 import com.aisay.manga.dto.request.UserUpdateRequest;
 import com.aisay.manga.dto.response.LoginResponse;
+import com.aisay.manga.dto.response.UserManageResponse;
 import com.aisay.manga.dto.response.UserProfileResponse;
 import com.aisay.manga.entity.User;
 import com.aisay.manga.repository.UserMapper;
@@ -11,10 +14,12 @@ import com.aisay.manga.service.UserService;
 import com.aisay.manga.utils.JwtUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import org.apache.commons.lang3.StringUtils;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.NoSuchElementException;
 
 @Service
@@ -50,6 +55,7 @@ public class UserServiceImpl implements UserService {
         user.setUsername(request.getUsername());
         user.setEmail(request.getEmail());
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+        user.setRole(UserRoles.USER);
 
         userMapper.insert(user);
         return toProfileResponse(userMapper.selectById(user.getId()));
@@ -70,7 +76,7 @@ public class UserServiceImpl implements UserService {
         }
 
         String token = jwtUtil.generateToken(user.getId(), user.getUsername());
-        return new LoginResponse(token, user.getId(), user.getUsername());
+        return new LoginResponse(token, user.getId(), user.getUsername(), UserRoles.normalize(user.getRole()));
     }
 
     /**
@@ -112,6 +118,38 @@ public class UserServiceImpl implements UserService {
     }
 
     /**
+     * 作用：root 查询所有用户及权限等级。
+     * 调用方：UserController#listUsers。
+     */
+    @Override
+    public List<UserManageResponse> listUsers(Long operatorUserId) {
+        requireRoot(operatorUserId);
+        return userMapper.selectList(new LambdaQueryWrapper<User>()
+                        .orderByAsc(User::getId))
+                .stream()
+                .map(this::toManageResponse)
+                .toList();
+    }
+
+    /**
+     * 作用：root 修改其他用户权限等级。
+     * 调用方：UserController#updateUserRole。
+     */
+    @Override
+    @Transactional
+    public UserManageResponse updateUserRole(Long operatorUserId, Long targetUserId, UserRoleUpdateRequest request) {
+        requireRoot(operatorUserId);
+        if (operatorUserId.equals(targetUserId)) {
+            throw new IllegalArgumentException("不能修改自己的权限等级");
+        }
+
+        User targetUser = getUserById(targetUserId);
+        targetUser.setRole(UserRoles.normalize(request.getRole()));
+        userMapper.updateById(targetUser);
+        return toManageResponse(userMapper.selectById(targetUserId));
+    }
+
+    /**
      * 作用：按用户 ID 查询用户，不存在时抛出 404 语义异常。
      * 调用方：getProfile、updateProfile。
      */
@@ -121,6 +159,13 @@ public class UserServiceImpl implements UserService {
             throw new NoSuchElementException("用户不存在");
         }
         return user;
+    }
+
+    private void requireRoot(Long userId) {
+        User user = getUserById(userId);
+        if (!UserRoles.isRoot(user.getRole())) {
+            throw new AccessDeniedException("仅 root 可以管理用户权限");
+        }
     }
 
     /**
@@ -159,7 +204,20 @@ public class UserServiceImpl implements UserService {
                 user.getUsername(),
                 user.getEmail(),
                 user.getAvatarPath(),
+                UserRoles.normalize(user.getRole()),
                 user.getCreatedAt()
+        );
+    }
+
+    private UserManageResponse toManageResponse(User user) {
+        return new UserManageResponse(
+                user.getId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getAvatarPath(),
+                UserRoles.normalize(user.getRole()),
+                user.getCreatedAt(),
+                user.getUpdatedAt()
         );
     }
 }

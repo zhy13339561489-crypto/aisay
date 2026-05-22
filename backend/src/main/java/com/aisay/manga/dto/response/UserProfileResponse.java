@@ -19,5 +19,7 @@ public class UserProfileResponse {
 
     private String avatarPath;
 
+    private String role;
+
     private LocalDateTime createdAt;
 }
