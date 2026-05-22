@@ -117,6 +117,18 @@ public class StoryController {
     }
 
     /**
+     * 作用：根据某一小节的故事细节异步生成分镜故事脚本。
+     * 调用方：前端故事详情页每个小节卡片中的“生成故事脚本”按钮。
+     */
+    @PostMapping("/{id}/volume-sections/{sectionId}/script/generate")
+    public ApiResponse<StoryDetailResponse> generateSectionScript(
+            @PathVariable Long id,
+            @PathVariable Long sectionId
+    ) {
+        return ApiResponse.success("Section script generation submitted", storyService.generateSectionScript(id, sectionId, SecurityUtils.getCurrentUserId()));
+    }
+
+    /**
      * 作用：保存用户手动编辑后的分卷大纲列表。
      * 调用方：前端故事详情页“手动修改分卷大纲”弹窗请求 PUT /api/story/{id}/volume-outline。
      */

@@ -23,6 +23,7 @@ export const useStoryStore = defineStore('story', () => {
   const isRevisingVolumeOutline = ref(false);
   const generatingVolumeSectionsVolumeId = ref<number | null>(null);
   const generatingSectionAssetsSectionId = ref<number | null>(null);
+  const generatingSectionScriptSectionId = ref<number | null>(null);
   const isSavingVolumeOutline = ref(false);
   const uploadingAssetAudioId = ref<number | null>(null);
   const pagination = ref({
@@ -161,6 +162,18 @@ export const useStoryStore = defineStore('story', () => {
     }
   }
 
+  async function generateSectionScript(id: number, sectionId: number) {
+    generatingSectionScriptSectionId.value = sectionId;
+    try {
+      const story = await storyApi.generateSectionScript(id, sectionId);
+      currentStory.value = story;
+      upsertStory(story);
+      return story;
+    } finally {
+      generatingSectionScriptSectionId.value = null;
+    }
+  }
+
   async function uploadCharacterAudio(id: number, assetId: number, file: File) {
     uploadingAssetAudioId.value = assetId;
     try {
@@ -211,6 +224,7 @@ export const useStoryStore = defineStore('story', () => {
     isRevisingVolumeOutline,
     generatingVolumeSectionsVolumeId,
     generatingSectionAssetsSectionId,
+    generatingSectionScriptSectionId,
     isSavingVolumeOutline,
     uploadingAssetAudioId,
     hasStories,
@@ -225,6 +239,7 @@ export const useStoryStore = defineStore('story', () => {
     reviseVolumeOutline,
     generateVolumeSections,
     generateSectionAssets,
+    generateSectionScript,
     uploadCharacterAudio,
     updateVolumeOutlines,
     deleteStory,

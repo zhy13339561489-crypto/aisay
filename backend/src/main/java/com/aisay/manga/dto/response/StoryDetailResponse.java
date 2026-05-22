@@ -95,6 +95,30 @@ public class StoryDetailResponse extends StoryResponse {
         private String endingHook;
 
         private List<StoryAssetItem> assets;
+
+        private Integer scriptTotalDurationSeconds;
+
+        private List<StorySectionScriptItem> scripts;
+    }
+
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class StorySectionScriptItem {
+
+        private Long id;
+
+        private Integer shotNumber;
+
+        private Integer durationSeconds;
+
+        private String shotType;
+
+        private String cameraMovement;
+
+        private String action;
+
+        private String dialogue;
     }
 
     @Data

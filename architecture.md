@@ -1106,3 +1106,35 @@ sequenceDiagram
 图片文件本体保存在本地文件系统，数据库 `story_assets.image_path` 只保存相对路径，例如 `generated-assets/2026-05-21/xxx.png`。Java 在返回故事详情时会把它转换为 `imageUrl=/api/files/generated-assets/2026-05-21/xxx.png`；前端如果只拿到 `imagePath`，也会自动补成 `/api/files/...`。由于浏览器 `<img>` 请求不会携带 axios 的 Bearer Token，后端只对 `GET /api/files/**` 放行公开读取，上传和删除文件仍走原有鉴权链路。
 
 豆包图片提示词按资产类型分流。通义在 `prompt_SectionAssetExtraction` 中先判断资产是人物还是场景：人物、怪物、拟人角色等进入 `characters`，地点、房间、街区、建筑、战斗场地等进入 `scenes`。Python 根据 `assetType` 自动选择提示词：`CHARACTER` 使用人物三视图提示词，要求同一角色在一张图中展示正面、侧面、背面并保持服装、发型、配色一致；`SCENE` 使用场景概念图提示词，强调空间结构、光影氛围和可复用环境元素。
+
+### 小节故事脚本生成架构
+
+小节故事脚本是独立于人物/场景图片资产之外的异步 AI 能力。用户在故事详情页的某个小节上点击“生成故事脚本”后，前端调用 `POST /api/story/{id}/volume-sections/{sectionId}/script/generate`；Java 校验故事归属和小节内容后，把故事标题、视觉风格、故事摘要、总大纲、主要角色、当前分卷大纲和当前小节内容封装为 `SECTION_SCRIPT_GENERATE` 消息投递到 `aisay.ai.story.request`。接口立即返回，前端继续按既有轮询机制刷新详情。
+
+```mermaid
+sequenceDiagram
+    participant View as StoryDetailView
+    participant Java as StoryService
+    participant RequestQ as RabbitMQ request queue
+    participant Python as story_ai/rabbitmq_worker
+    participant LLM as Tongyi structured output
+    participant ResultQ as RabbitMQ result queue
+    participant DB as story_section_scripts
+
+    View->>Java: POST /api/story/{id}/volume-sections/{sectionId}/script/generate
+    Java->>RequestQ: SECTION_SCRIPT_GENERATE + section context
+    Java-->>View: 返回 section_script_pending
+    Python->>RequestQ: 消费小节脚本生成任务
+    Python->>LLM: 根据小节故事生成总时长和分镜脚本
+    LLM-->>Python: sectionScript JSON
+    Python->>ResultQ: 发布 sectionScript 结果
+    Java->>ResultQ: 监听结果
+    Java->>DB: 清空当前小节旧脚本并写入新分镜
+    Java-->>View: 轮询返回 scripts 与 scriptTotalDurationSeconds
+```
+
+数据职责如下：
+- `story_section_scripts`：保存小节级分镜脚本，一条记录对应一个镜头，包含镜头序号、时长、分镜类型、镜头运动、动作和台词。
+- `AiStoryTaskMessage.section`：提交任务时携带当前小节故事正文，避免 Python 再反查 Java。
+- `AiStoryTaskResultMessage.sectionScript`：Python 通过 RabbitMQ 回传结构化脚本，Java 负责最终落库。
+- `StoryDetailResponse.VolumeSectionItem.scripts`：前端展示小节脚本列表；`scriptTotalDurationSeconds` 用于显示 AI 自行决定的总时长。

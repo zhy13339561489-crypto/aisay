@@ -149,10 +149,41 @@
                   >
                     {{ section.assets?.length ? '重新生成人物/场景图片' : '生成人物/场景图片' }}
                   </el-button>
+                  <el-button
+                    type="success"
+                    plain
+                    size="small"
+                    :loading="storyStore.generatingSectionScriptSectionId === section.id"
+                    @click="generateSectionScript(section.id)"
+                  >
+                    {{ section.scripts?.length ? '重新生成故事脚本' : '生成故事脚本' }}
+                  </el-button>
                 </div>
                 <p v-if="section.summary" class="volume-summary">{{ section.summary }}</p>
                 <p v-if="section.content" class="script-text">{{ section.content }}</p>
                 <p v-if="section.endingHook" class="ending-hook">小节钩子：{{ section.endingHook }}</p>
+                <div v-if="section.scripts?.length" class="section-script-board">
+                  <div class="section-script-header">
+                    <h5>故事脚本</h5>
+                    <span>总时长约 {{ formatDuration(section.scriptTotalDurationSeconds) }}</span>
+                  </div>
+                  <div class="script-shot-list">
+                    <article
+                      v-for="shot in section.scripts"
+                      :key="shot.id"
+                      class="script-shot-card"
+                    >
+                      <div class="script-shot-meta">
+                        <el-tag size="small" type="success">#{{ shot.shotNumber }}</el-tag>
+                        <span>{{ formatDuration(shot.durationSeconds) }}</span>
+                        <span>{{ shot.shotType }}</span>
+                        <span v-if="shot.cameraMovement">{{ shot.cameraMovement }}</span>
+                      </div>
+                      <p class="script-shot-action">{{ shot.action }}</p>
+                      <p v-if="shot.dialogue" class="script-shot-dialogue">台词：{{ shot.dialogue }}</p>
+                    </article>
+                  </div>
+                </div>
                 <div v-if="section.assets?.length" class="section-assets">
                   <h5>本节人物与场景资源</h5>
                   <div class="asset-grid">
@@ -681,6 +712,29 @@ async function generateSectionAssets(sectionId: number) {
   startStoryPolling(story.value.id);
 }
 
+async function generateSectionScript(sectionId: number) {
+  if (!story.value) {
+    return;
+  }
+
+  await storyStore.generateSectionScript(story.value.id, sectionId);
+  ElMessage.success('故事脚本生成任务已提交，完成后会自动刷新');
+  startStoryPolling(story.value.id);
+}
+
+function formatDuration(seconds?: number) {
+  const normalizedSeconds = Number(seconds) || 0;
+  if (normalizedSeconds <= 0) {
+    return '待定';
+  }
+  const minutes = Math.floor(normalizedSeconds / 60);
+  const restSeconds = normalizedSeconds % 60;
+  if (minutes <= 0) {
+    return `${restSeconds}秒`;
+  }
+  return restSeconds > 0 ? `${minutes}分${restSeconds}秒` : `${minutes}分钟`;
+}
+
 function assetTypeLabel(assetType?: string) {
   if (assetType === 'CHARACTER') {
     return '人物';
@@ -848,6 +902,9 @@ function statusLabel(status?: string) {
   if (status === 'section_asset_pending') {
     return '小节图片生成中';
   }
+  if (status === 'section_script_pending') {
+    return '故事脚本生成中';
+  }
   if (status === 'failed') {
     return '生成失败';
   }
@@ -884,7 +941,7 @@ function stopStoryPolling() {
 }
 
 function isProcessingStatus(status?: string) {
-  return status === 'generating' || status === 'revising' || status === 'volume_pending' || status === 'volume_story_pending' || status === 'volume_section_pending' || status === 'section_asset_pending';
+  return status === 'generating' || status === 'revising' || status === 'volume_pending' || status === 'volume_story_pending' || status === 'volume_section_pending' || status === 'section_asset_pending' || status === 'section_script_pending';
 }
 
 function syncSelectedVolume() {
@@ -1049,6 +1106,67 @@ h3 {
 
 .section-assets {
   margin-top: 16px;
+}
+
+.section-script-board {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(22, 163, 74, 0.18);
+  border-radius: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(187, 247, 208, 0.7), transparent 18rem),
+    rgba(240, 253, 244, 0.72);
+}
+
+.section-script-header,
+.script-shot-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.section-script-header {
+  justify-content: space-between;
+  color: #166534;
+  font-weight: 800;
+}
+
+.section-script-header h5 {
+  margin: 0;
+  color: #14532d;
+}
+
+.script-shot-list {
+  display: grid;
+  gap: 10px;
+}
+
+.script-shot-card {
+  padding: 12px;
+  border: 1px solid rgba(20, 83, 45, 0.1);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.script-shot-meta {
+  color: #166534;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.script-shot-action,
+.script-shot-dialogue {
+  margin: 8px 0 0;
+  color: #334155;
+  line-height: 1.7;
+}
+
+.script-shot-dialogue {
+  color: #0f766e;
+  font-weight: 700;
 }
 
 .section-assets h5 {

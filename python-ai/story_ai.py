@@ -22,6 +22,7 @@ from prompt import (
     prompt_Outline,
     prompt_ReviseOutline,
     prompt_SectionAssetExtraction,
+    prompt_SectionScriptGenerate,
     prompt_VolumeCount,
     prompt_VolumeOutlineSingle,
     prompt_VolumeOutline_Editor,
@@ -42,6 +43,7 @@ promptTemplate_VolumeSectionCount = PromptTemplate.from_template(prompt_VolumeSe
 promptTemplate_VolumeSectionSingle = PromptTemplate.from_template(prompt_VolumeSectionSingle)
 promptTemplate_VolumeStory = PromptTemplate.from_template(prompt_VolumeStory)
 promptTemplate_SectionAssetExtraction = PromptTemplate.from_template(prompt_SectionAssetExtraction)
+promptTemplate_SectionScriptGenerate = PromptTemplate.from_template(prompt_SectionScriptGenerate)
 
 
 class StoryOutlineGenerateRequest(BaseModel):
@@ -248,6 +250,42 @@ class StorySectionAssetGenerateRequest(BaseModel):
     volume_outline: VolumeOutlineItem = Field(alias="volumeOutline")
     section: VolumeSectionItem
     existing_assets: list[ExistingStoryAsset] = Field(default_factory=list, alias="existingAssets")
+
+
+class StorySectionScriptGenerateRequest(BaseModel):
+    """单个小节故事脚本生成请求体。
+    调用方：rabbitmq_worker 小节脚本生成任务，同时保留 HTTP 路由用于本地调试。
+    """
+
+    user_id: int = Field(alias="userId")
+    story_id: int = Field(alias="storyId")
+    volume_id: int = Field(alias="volumeId")
+    title: str
+    story_style: str | None = Field(default=None, alias="storyStyle")
+    story_summary: str | None = Field(default=None, alias="storySummary")
+    outline: str | None = None
+    main_characters: list[MainCharacterSetting] = Field(default_factory=list, alias="mainCharacters")
+    volume_outline: VolumeOutlineItem = Field(alias="volumeOutline")
+    section: VolumeSectionItem
+
+
+class ScriptShotItem(BaseModel):
+    """单个故事脚本分镜。"""
+
+    shot_number: int = Field(alias="shotNumber", ge=1, description="Shot number, starting from 1")
+    duration_seconds: int = Field(alias="durationSeconds", ge=1, description="Duration of this shot in seconds")
+    shot_type: str = Field(alias="shotType", description="Shot type, such as 全景, 近景, 特写, 推拉, 摇移")
+    camera_movement: str | None = Field(default=None, alias="cameraMovement", description="Camera movement for this shot")
+    action: str = Field(description="Visible action, emotion, scene change, and cinematic direction")
+    dialogue: str | None = Field(default=None, description="Spoken dialogue in this shot, empty when no dialogue")
+
+
+class StorySectionScriptGenerateResponse(BaseModel):
+    """小节故事脚本生成响应体。"""
+
+    section_number: int = Field(alias="sectionNumber")
+    total_duration_seconds: int = Field(alias="totalDurationSeconds", ge=1)
+    shots: list[ScriptShotItem]
 
 
 class NovelOutlineOutput(BaseModel):
@@ -1079,6 +1117,60 @@ def generate_section_assets(request: StorySectionAssetGenerateRequest) -> StoryV
     log_progress(trace_id, f"section assets generated: {len(section.assets)}", started_at, scope)
 
     return StoryVolumeSectionGenerateResponse(sections=[section])
+
+
+@router.post("/api/story/section-script", response_model=StorySectionScriptGenerateResponse)
+def generate_section_script(request: StorySectionScriptGenerateRequest) -> StorySectionScriptGenerateResponse:
+    """作用：根据单个小节故事生成分镜故事脚本。
+    调用方：rabbitmq_worker 小节脚本生成任务；同时保留 HTTP 路由用于本地调试。
+    """
+    trace_id = uuid.uuid4().hex[:8]
+    started_at = time.perf_counter()
+    scope = "section-script"
+    if not request.section.content or not request.section.content.strip():
+        raise HTTPException(status_code=400, detail="Section content is required before generating section script")
+
+    log_progress(
+        trace_id,
+        (
+            f"request accepted, user_id={request.user_id}, story_id={request.story_id}, "
+            f"volume_id={request.volume_id}, section={request.section.section_number}"
+        ),
+        started_at,
+        scope,
+    )
+
+    structured_llm = structured_llm_base.with_structured_output(StorySectionScriptGenerateResponse)
+    chain = promptTemplate_SectionScriptGenerate | structured_llm
+    log_progress(trace_id, "structured section script chain created, invoking Tongyi model", started_at, scope)
+    result = chain.invoke(
+        {
+            "Title": request.title,
+            "StoryStyle": request.story_style or "高质量国漫/漫剧视觉",
+            "StorySummary": request.story_summary or "",
+            "Outline": request.outline or "",
+            "Characters": build_characters_text(request.main_characters),
+            "VolumeNumber": request.volume_outline.volume_number,
+            "VolumeTitle": request.volume_outline.title,
+            "VolumeSummary": request.volume_outline.summary or "",
+            "VolumeContent": request.volume_outline.content or "",
+            "EndingHook": request.volume_outline.ending_hook or "",
+            "SectionNumber": request.section.section_number,
+            "SectionTitle": request.section.title,
+            "SectionSummary": request.section.summary or "",
+            "SectionContent": request.section.content,
+            "SectionEndingHook": request.section.ending_hook or "",
+        },
+        config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
+    )
+
+    if not result.shots:
+        raise HTTPException(status_code=502, detail="Tongyi model returned no section script shots")
+    result.section_number = request.section.section_number
+    if not result.total_duration_seconds:
+        result.total_duration_seconds = sum(max(shot.duration_seconds or 0, 0) for shot in result.shots)
+    log_progress(trace_id, f"section script generated: {len(result.shots)} shots", started_at, scope)
+    return result
 
 
 def generate_volume_sections(

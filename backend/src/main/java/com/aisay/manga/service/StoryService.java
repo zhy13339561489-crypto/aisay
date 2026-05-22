@@ -56,6 +56,12 @@ public interface StoryService {
     StoryDetailResponse generateSectionAssets(Long storyId, Long sectionId, Long userId);
 
     /**
+     * 作用：根据指定小节内容异步生成可用于视频制作的分镜脚本。
+     * 调用方：StoryController#generateSectionScript。
+     */
+    StoryDetailResponse generateSectionScript(Long storyId, Long sectionId, Long userId);
+
+    /**
      * 作用：手动保存用户编辑后的分卷大纲列表。
      * 调用方：StoryController#updateVolumeOutlines。
      */

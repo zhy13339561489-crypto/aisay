@@ -5,6 +5,7 @@ import com.aisay.manga.dto.ai.AiStoryTaskMessage;
 import com.aisay.manga.dto.ai.AiStoryTaskResultMessage;
 import com.aisay.manga.dto.ai.StoryAssetReference;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
+import com.aisay.manga.dto.ai.StorySectionScriptGenerateResponse;
 import com.aisay.manga.dto.ai.StoryVolumeOutlineGenerateResponse;
 import com.aisay.manga.dto.ai.StoryVolumeSectionGenerateResponse;
 import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
@@ -18,6 +19,7 @@ import com.aisay.manga.dto.response.StoryResponse;
 import com.aisay.manga.entity.Character;
 import com.aisay.manga.entity.Story;
 import com.aisay.manga.entity.StoryAsset;
+import com.aisay.manga.entity.StorySectionScript;
 import com.aisay.manga.entity.StorySectionAsset;
 import com.aisay.manga.entity.StoryVolumeOutline;
 import com.aisay.manga.entity.StoryVolumeSection;
@@ -25,6 +27,7 @@ import com.aisay.manga.repository.CharacterMapper;
 import com.aisay.manga.repository.StoryAssetMapper;
 import com.aisay.manga.repository.StoryMapper;
 import com.aisay.manga.repository.StorySectionAssetMapper;
+import com.aisay.manga.repository.StorySectionScriptMapper;
 import com.aisay.manga.repository.StoryVolumeOutlineMapper;
 import com.aisay.manga.repository.StoryVolumeSectionMapper;
 import com.aisay.manga.service.StoryService;
@@ -39,6 +42,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -62,6 +66,8 @@ public class StoryServiceImpl implements StoryService {
 
     private static final String STORY_STATUS_SECTION_ASSET_PENDING = "section_asset_pending";
 
+    private static final String STORY_STATUS_SECTION_SCRIPT_PENDING = "section_script_pending";
+
     private static final String STORY_STATUS_FAILED = "failed";
 
     private final StoryMapper storyMapper;
@@ -75,6 +81,8 @@ public class StoryServiceImpl implements StoryService {
     private final StoryAssetMapper storyAssetMapper;
 
     private final StorySectionAssetMapper storySectionAssetMapper;
+
+    private final StorySectionScriptMapper storySectionScriptMapper;
 
     private final LocalFileStorageUtil localFileStorageUtil;
 
@@ -91,6 +99,7 @@ public class StoryServiceImpl implements StoryService {
             StoryVolumeSectionMapper storyVolumeSectionMapper,
             StoryAssetMapper storyAssetMapper,
             StorySectionAssetMapper storySectionAssetMapper,
+            StorySectionScriptMapper storySectionScriptMapper,
             LocalFileStorageUtil localFileStorageUtil,
             AiStoryTaskPublisher aiStoryTaskPublisher
     ) {
@@ -100,6 +109,7 @@ public class StoryServiceImpl implements StoryService {
         this.storyVolumeSectionMapper = storyVolumeSectionMapper;
         this.storyAssetMapper = storyAssetMapper;
         this.storySectionAssetMapper = storySectionAssetMapper;
+        this.storySectionScriptMapper = storySectionScriptMapper;
         this.localFileStorageUtil = localFileStorageUtil;
         this.aiStoryTaskPublisher = aiStoryTaskPublisher;
     }
@@ -309,6 +319,38 @@ public class StoryServiceImpl implements StoryService {
     }
 
     /**
+     * 作用：把指定小节标记为脚本生成任务，异步投递给 Python worker。
+     * 调用方：StoryController#generateSectionScript。
+     */
+    @Override
+    @Transactional
+    public StoryDetailResponse generateSectionScript(Long storyId, Long sectionId, Long userId) {
+        Story story = getOwnedStory(storyId, userId);
+        StoryVolumeSection section = getOwnedSection(storyId, sectionId);
+        if (section.getContent() == null || section.getContent().isBlank()) {
+            throw new IllegalArgumentException("Section content is required before generating section script.");
+        }
+
+        StoryVolumeOutline volume = getOwnedVolume(storyId, section.getVolumeId());
+        story.setStatus(STORY_STATUS_SECTION_SCRIPT_PENDING);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+
+        AiStoryTaskMessage message = newTaskMessage(AiRabbitConstants.TASK_SECTION_SCRIPT_GENERATE, userId, storyId);
+        message.setVolumeId(volume.getId());
+        message.setTitle(story.getTitle());
+        message.setStoryStyle(story.getStyle());
+        message.setStorySummary(story.getSynopsis());
+        message.setOutline(story.getFullContent());
+        message.setMainCharacters(getMainCharacterSettings(storyId));
+        message.setVolumeOutlines(List.of(toAiVolumeOutlineItem(volume)));
+        message.setSection(toAiVolumeSectionItem(section));
+        publishAfterCommit(message);
+
+        return getStoryDetail(storyId, userId);
+    }
+
+    /**
      * 作用：保存用户手动编辑后的分卷大纲列表，整体替换当前 story 的旧分卷。
      * 调用方：StoryController#updateVolumeOutlines。
      */
@@ -355,6 +397,7 @@ public class StoryServiceImpl implements StoryService {
             case AiRabbitConstants.TASK_VOLUME_STORY_GENERATE -> applyVolumeStory(story, result);
             case AiRabbitConstants.TASK_VOLUME_SECTION_GENERATE -> applyGeneratedVolumeSectionResult(story, result);
             case AiRabbitConstants.TASK_SECTION_ASSET_GENERATE -> applySectionAssetResult(story, result);
+            case AiRabbitConstants.TASK_SECTION_SCRIPT_GENERATE -> applySectionScriptResult(story, result);
             default -> {
                 // Ignore unknown task types so one bad message does not block the listener.
             }
@@ -376,12 +419,13 @@ public class StoryServiceImpl implements StoryService {
         Map<Long, List<StoryVolumeSection>> sectionMap = sectionEntities.stream()
                 .collect(Collectors.groupingBy(StoryVolumeSection::getVolumeId));
         Map<Long, List<StoryAsset>> sectionAssetMap = getSectionAssetMap(storyId);
+        Map<Long, List<StorySectionScript>> sectionScriptMap = getSectionScriptMap(storyId);
 
         StoryDetailResponse response = new StoryDetailResponse();
         fillStoryResponse(response, story);
         response.setFullContent(story.getFullContent());
         response.setVolumeOutlines(volumeOutlines.stream()
-                .map(volume -> toVolumeOutlineItem(volume, sectionMap.getOrDefault(volume.getId(), List.of()), sectionAssetMap))
+                .map(volume -> toVolumeOutlineItem(volume, sectionMap.getOrDefault(volume.getId(), List.of()), sectionAssetMap, sectionScriptMap))
                 .toList());
         response.setCharacters(characters.stream().map(this::toCharacterItem).toList());
         response.setScenes(List.of());
@@ -636,6 +680,31 @@ public class StoryServiceImpl implements StoryService {
         storyMapper.updateById(story);
     }
 
+    private void applySectionScriptResult(Story story, AiStoryTaskResultMessage result) {
+        StorySectionScriptGenerateResponse response = result.getSectionScript();
+        if (response == null || response.getShots() == null || response.getShots().isEmpty()) {
+            markStoryFailed(story);
+            return;
+        }
+
+        StoryVolumeSection section = storyVolumeSectionMapper.selectOne(new LambdaQueryWrapper<StoryVolumeSection>()
+                .eq(StoryVolumeSection::getStoryId, story.getId())
+                .eq(StoryVolumeSection::getVolumeId, result.getVolumeId())
+                .eq(StoryVolumeSection::getSectionNumber, response.getSectionNumber())
+                .last("LIMIT 1"));
+        if (section == null) {
+            markStoryFailed(story);
+            return;
+        }
+
+        storySectionScriptMapper.delete(new LambdaQueryWrapper<StorySectionScript>()
+                .eq(StorySectionScript::getSectionId, section.getId()));
+        saveSectionScripts(story.getId(), section.getId(), response.getShots());
+        story.setStatus(STORY_STATUS_DRAFT);
+        story.setUpdatedAt(LocalDateTime.now());
+        storyMapper.updateById(story);
+    }
+
     private List<StoryOutlineGenerateResponse.MainCharacterSetting> getMainCharacterSettings(Long storyId) {
         return characterMapper.selectList(new LambdaQueryWrapper<Character>()
                         .eq(Character::getStoryId, storyId)
@@ -781,6 +850,16 @@ public class StoryServiceImpl implements StoryService {
                 ));
     }
 
+    private Map<Long, List<StorySectionScript>> getSectionScriptMap(Long storyId) {
+        return storySectionScriptMapper.selectList(new LambdaQueryWrapper<StorySectionScript>()
+                        .eq(StorySectionScript::getStoryId, storyId)
+                        .orderByAsc(StorySectionScript::getSectionId)
+                        .orderByAsc(StorySectionScript::getShotNumber)
+                        .orderByAsc(StorySectionScript::getId))
+                .stream()
+                .collect(Collectors.groupingBy(StorySectionScript::getSectionId));
+    }
+
     private StoryVolumeSection replaceSingleVolumeSection(
             Long storyId,
             Long volumeId,
@@ -893,6 +972,41 @@ public class StoryServiceImpl implements StoryService {
         link.setAssetId(assetId);
         link.setCreatedAt(LocalDateTime.now());
         storySectionAssetMapper.insert(link);
+    }
+
+    private void saveSectionScripts(
+            Long storyId,
+            Long sectionId,
+            List<StorySectionScriptGenerateResponse.ScriptShotItem> shots
+    ) {
+        if (shots == null || shots.isEmpty()) {
+            return;
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        List<StorySectionScriptGenerateResponse.ScriptShotItem> orderedShots = shots.stream()
+                .filter(shot -> shot.getAction() != null && !shot.getAction().isBlank())
+                .sorted(Comparator.comparing(
+                        StorySectionScriptGenerateResponse.ScriptShotItem::getShotNumber,
+                        Comparator.nullsLast(Integer::compareTo)
+                ))
+                .toList();
+
+        for (int index = 0; index < orderedShots.size(); index++) {
+            StorySectionScriptGenerateResponse.ScriptShotItem shot = orderedShots.get(index);
+            StorySectionScript script = new StorySectionScript();
+            script.setStoryId(storyId);
+            script.setSectionId(sectionId);
+            script.setShotNumber(index + 1);
+            script.setDurationSeconds(shot.getDurationSeconds() == null ? 5 : shot.getDurationSeconds());
+            script.setShotType(resolveText(shot.getShotType(), "中景"));
+            script.setCameraMovement(shot.getCameraMovement());
+            script.setAction(shot.getAction());
+            script.setDialogue(shot.getDialogue());
+            script.setCreatedAt(now);
+            script.setUpdatedAt(now);
+            storySectionScriptMapper.insert(script);
+        }
     }
 
     private Story getOwnedStory(Long storyId, Long userId) {
@@ -1009,7 +1123,8 @@ public class StoryServiceImpl implements StoryService {
     private StoryDetailResponse.VolumeOutlineItem toVolumeOutlineItem(
             StoryVolumeOutline volume,
             List<StoryVolumeSection> sections,
-            Map<Long, List<StoryAsset>> sectionAssetMap
+            Map<Long, List<StoryAsset>> sectionAssetMap,
+            Map<Long, List<StorySectionScript>> sectionScriptMap
     ) {
         return new StoryDetailResponse.VolumeOutlineItem(
                 volume.getId(),
@@ -1020,12 +1135,20 @@ public class StoryServiceImpl implements StoryService {
                 volume.getEndingHook(),
                 volume.getDetailedContent(),
                 sections.stream()
-                        .map(section -> toVolumeSectionItem(section, sectionAssetMap.getOrDefault(section.getId(), List.of())))
+                        .map(section -> toVolumeSectionItem(
+                                section,
+                                sectionAssetMap.getOrDefault(section.getId(), List.of()),
+                                sectionScriptMap.getOrDefault(section.getId(), List.of())
+                        ))
                         .toList()
         );
     }
 
-    private StoryDetailResponse.VolumeSectionItem toVolumeSectionItem(StoryVolumeSection section, List<StoryAsset> assets) {
+    private StoryDetailResponse.VolumeSectionItem toVolumeSectionItem(
+            StoryVolumeSection section,
+            List<StoryAsset> assets,
+            List<StorySectionScript> scripts
+    ) {
         return new StoryDetailResponse.VolumeSectionItem(
                 section.getId(),
                 section.getSectionNumber(),
@@ -1033,7 +1156,24 @@ public class StoryServiceImpl implements StoryService {
                 section.getSummary(),
                 section.getContent(),
                 section.getEndingHook(),
-                assets.stream().map(this::toStoryAssetItem).toList()
+                assets.stream().map(this::toStoryAssetItem).toList(),
+                scripts.stream()
+                        .map(StorySectionScript::getDurationSeconds)
+                        .filter(duration -> duration != null && duration > 0)
+                        .reduce(0, Integer::sum),
+                scripts.stream().map(this::toStorySectionScriptItem).toList()
+        );
+    }
+
+    private StoryDetailResponse.StorySectionScriptItem toStorySectionScriptItem(StorySectionScript script) {
+        return new StoryDetailResponse.StorySectionScriptItem(
+                script.getId(),
+                script.getShotNumber(),
+                script.getDurationSeconds(),
+                script.getShotType(),
+                script.getCameraMovement(),
+                script.getAction(),
+                script.getDialogue()
         );
     }
 

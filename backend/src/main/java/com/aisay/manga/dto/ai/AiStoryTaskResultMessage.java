@@ -31,6 +31,8 @@ public class AiStoryTaskResultMessage {
 
     private StoryVolumeSectionGenerateResponse volumeSection;
 
+    private StorySectionScriptGenerateResponse sectionScript;
+
     private String volumeStory;
 
     private Boolean partial;

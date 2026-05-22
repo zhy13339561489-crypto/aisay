@@ -1500,3 +1500,41 @@
 - [ ] 重启 Java 后端，让 `/api/files/**` 公开读取配置生效。
 - [ ] 重启 Python FastAPI，让人物三视图和场景概念图提示词生效。
 - [ ] 重新刷新故事详情页；如果图片路径存在且文件在本地，应能直接显示。
+
+## 2026-05-22 小节故事脚本生成
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260522_create_story_section_scripts.sql`，创建 `story_section_scripts` 小节分镜脚本表。
+- [x] 同步更新 `backend/src/main/resources/db/init.sql`，新环境初始化时会自动创建脚本表。
+- [x] 脚本表通过 `story_id` 关联漫剧，通过 `section_id` 关联小节；同一小节内使用 `section_id + shot_number` 保证分镜顺序唯一。
+
+### 后端
+- [x] 新增 `StorySectionScript` 实体、`StorySectionScriptMapper` 和 `StorySectionScriptGenerateResponse` DTO。
+- [x] 新增 RabbitMQ 任务类型 `SECTION_SCRIPT_GENERATE`，用于把小节脚本生成从 Java 同步等待中拆出。
+- [x] 新增接口 `POST /api/story/{id}/volume-sections/{sectionId}/script/generate`，每个小节可以单独提交故事脚本生成任务。
+- [x] `StoryServiceImpl.generateSectionScript` 会读取故事、大纲、角色、当前分卷和当前小节内容，并投递给 Python worker。
+- [x] Java 监听到 Python 返回的 `sectionScript` 后，会清空当前小节旧脚本并写入新的分镜列表，最后把故事状态恢复为 `draft`。
+- [x] 故事详情接口现在会在每个小节中返回 `scriptTotalDurationSeconds` 和 `scripts`，供前端直接展示。
+
+### Python
+- [x] 新增 `prompt_SectionScriptGenerate`，要求大模型根据小节故事生成总时长自定的分镜故事脚本。
+- [x] 新增 `/api/story/section-script` 调试接口和 `generate_section_script` 函数，使用 `with_structured_output()` 约束输出结构。
+- [x] 输出结构固定包含：小节号、总时长、分镜列表；每条分镜包含时长、分镜类型、镜头运动、动作、台词。
+- [x] `rabbitmq_worker.py` 支持消费 `SECTION_SCRIPT_GENERATE`，并把生成结果通过 `sectionScript` 回传 Java。
+
+### 前端
+- [x] 每个小节卡片新增“生成故事脚本 / 重新生成故事脚本”按钮。
+- [x] 新增小节级 loading 状态，提交任务后进入轮询，等待 Java 后端落库完成。
+- [x] 小节下方新增“故事脚本”展示区，展示总时长、分镜编号、时长、分镜类型、镜头运动、动作和台词。
+- [x] 故事列表和详情页新增 `section_script_pending` 状态展示。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml compile`。
+- [x] Python 导入检查成功：`.\venv\Scripts\python.exe -B -c "import story_ai, rabbitmq_worker; print('python import ok')"`。
+- [x] 前端构建成功：`npm run build`。
+- [x] 前端构建仍有 Sass legacy JS API、Rollup 注释和大 chunk 警告，属于既有非阻断警告。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260522_create_story_section_scripts.sql`。
+- [ ] 重启 Java 后端，让新增表映射、接口、RabbitMQ 任务类型和结果落库逻辑生效。
+- [ ] 重启 Python FastAPI，让 `SECTION_SCRIPT_GENERATE` worker 分支和脚本提示词生效。
+- [ ] 刷新前端故事详情页，进入已有小节后点击“生成故事脚本”；完成后小节下方应显示分镜脚本列表。

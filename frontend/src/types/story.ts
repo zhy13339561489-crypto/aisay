@@ -45,6 +45,18 @@ export interface StoryVolumeSection {
   content?: string;
   endingHook?: string;
   assets?: StoryAsset[];
+  scriptTotalDurationSeconds?: number;
+  scripts?: StorySectionScript[];
+}
+
+export interface StorySectionScript {
+  id: number;
+  shotNumber: number;
+  durationSeconds: number;
+  shotType: string;
+  cameraMovement?: string;
+  action: string;
+  dialogue?: string;
 }
 
 export interface StoryAsset {

@@ -71,6 +71,11 @@ export async function generateSectionAssets(id: number, sectionId: number) {
   return unwrap(response.data);
 }
 
+export async function generateSectionScript(id: number, sectionId: number) {
+  const response = await request.post<ApiResponse<StoryDetailResponse>>(`/api/story/${id}/volume-sections/${sectionId}/script/generate`);
+  return unwrap(response.data);
+}
+
 export async function uploadCharacterAudio(id: number, assetId: number, file: File) {
   const formData = new FormData();
   formData.append('file', file);
