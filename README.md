@@ -9,11 +9,12 @@
 **核心特性：**
 - **自然对话交互**：通过日常聊天形式收集创作需求，AI Agent 自动理解意图并调用对应能力
 - **渐进式生成**：多轮对话逐步细化角色、剧情、风格设定
-- **完整漫剧内容**：自动生成剧情大纲、分卷大纲、小节故事
+- **完整漫剧内容**：自动生成剧情大纲、分卷大纲、小节故事、分镜脚本
 - **AI 资产生成**：自动识别人物/场景，调用豆包生成三视图设定图和环境概念图
 - **异步任务架构**：RabbitMQ 消息队列驱动非对话 AI 任务，支持逐卷/逐节增量回传
+- **提示词动态管理**：支持数据库配置提示词，按题材/风格精确匹配特定提示词
+- **用户权限系统**：ROOT/ADMIN/USER 三级角色，分级管理功能权限
 - **模块化架构**：前后端分离，AI 引擎独立部署，易于扩展和维护
-- **响应式界面**：适配PC、平板、手机多端
 
 ## 系统架构
 
@@ -134,7 +135,7 @@ aisay/
 │
 ├── frontend/                       # Vue 3 前端
 │   └── src/
-│       ├── views/                  # 页面组件 (Chat, StoryList, StoryDetail, User)
+│       ├── views/                  # 页面组件 (Chat, StoryList, StoryDetail, User, Prompt, etc.)
 │       ├── components/             # 可复用组件
 │       │   ├── chat/               # 聊天组件 (MessageBubble, InputArea, SessionList)
 │       │   └── story/              # 漫剧组件 (CharacterCard)
@@ -145,11 +146,22 @@ aisay/
 │
 ├── python-ai/                      # Python AI 引擎
 │   ├── main.py                     # FastAPI 入口，挂载 router
-│   ├── ai_runtime.py               # 通用运行时 (LLM 实例, 回调, 日志)
-│   ├── story_ai.py                 # 故事相关 API (大纲/分卷/小节生成与修改)
-│   ├── chat_ai.py                  # 对话 Agent API (意图理解与路由分发)
-│   ├── prompt.py                   # 所有提示词模板
-│   ├── rabbitmq_worker.py          # RabbitMQ 消费者，异步处理故事 AI 任务
+│   ├── ai_runtime.py               # 通用运行时 (LLM 实例, 回调, 日志, 重试)
+│   ├── story_ai.py                 # 故事 API 兼容门面
+│   ├── story_ai_pkg/               # 故事 AI 包（按职责拆分）
+│   │   ├── models.py               # Pydantic 数据模型
+│   │   ├── templates.py            # PromptTemplate 初始化
+│   │   ├── prompt_repository.py    # 数据库提示词加载
+│   │   ├── formatters.py           # 文本格式化工具
+│   │   ├── outline.py              # 剧情大纲生成与修改
+│   │   ├── volumes.py              # 分卷大纲生成、修改与正文
+│   │   ├── sections.py             # 分卷小节生成
+│   │   ├── assets.py               # 人物/场景资产与豆包图片
+│   │   ├── scripts.py              # 分镜脚本生成
+│   │   └── router.py               # FastAPI 路由器
+│   ├── chat_ai.py                  # 对话 Agent API
+│   ├── prompt.py                   # 提示词模板（数据库兜底）
+│   ├── rabbitmq_worker.py          # RabbitMQ 消费者
 │   ├── requirements.txt            # Python 依赖
 │   └── api.yml                     # 通义千问 & 豆包 API Key (已 gitignore)
 │
@@ -158,10 +170,11 @@ aisay/
 
 ## 核心功能
 
-### 1. 用户认证
+### 1. 用户认证与权限
 - JWT 无状态认证，token 有效期 24 小时
-- 注册、登录、用户资料管理
-- 头像上传（本地文件存储）
+- 注册、登录、用户资料管理、头像上传
+- 三级角色权限：ROOT（超级管理员）、ADMIN（管理员）、USER（普通用户）
+- ROOT 可管理所有用户角色，ADMIN 可管理大纲配置和提示词
 
 ### 2. 对话系统
 - 多轮对话会话管理
@@ -187,7 +200,13 @@ aisay/
 - 增量回传，前端逐步展示已生成的小节
 - 小节生成采用纯文本标签解析，避免长正文 JSON 转义失败
 
-### 6. AI 资产生成
+### 6. 分镜脚本生成
+- 根据小节故事生成镜头级分镜脚本
+- 每个镜头包含：镜头号、时长、景别、运镜、动作、对白
+- 使用结构化输出约束，确保分镜格式统一
+- 支持自动计算总时长
+
+### 7. AI 资产生成
 - 每个小节可自动识别出现的人物和场景
 - 人物资产生成三视图设定图（正面、侧面、背面）
 - 场景资产生成环境概念图
@@ -195,10 +214,23 @@ aisay/
 - 已识别的人物/场景自动复用，避免重复生成
 - 支持上传人物音频，为角色配音
 
-### 7. 异步任务架构
+### 8. 提示词动态管理
+- 数据库存储提示词模板，支持在线编辑
+- 按任务类型分类管理（剧情大纲、分卷、小节、资产、脚本、对话）
+- 支持默认提示词和特定提示词（按题材/风格匹配）
+- 特定提示词优先级高于默认提示词
+- Python 引擎优先从数据库加载，数据库不可用时回退到文件兜底
+
+### 9. 大纲配置管理
+- 数据库管理题材和漫剧风格选项
+- 生成大纲弹窗从数据库动态加载选项列表
+- 支持新增、编辑、启停和删除
+
+### 10. 异步任务架构
 - RabbitMQ 消息队列驱动所有非对话 AI 任务
 - Java 提交任务后立即返回，Python 后台异步处理
 - 支持 partial/completed 消息，实现增量结果回传
+- LLM 调用自动重试（网络超时、5xx 错误）
 - 前端轮询获取最新结果
 
 ## 数据库设计
@@ -215,21 +247,26 @@ erDiagram
     stories ||--o{ characters : has
     stories ||--o{ story_volume_outlines : has
     story_volume_outlines ||--o{ story_volume_sections : has
+    story_volume_sections ||--o{ story_section_scripts : has
     stories ||--o{ story_assets : has
     story_volume_sections ||--o{ story_section_assets : has
     story_assets ||--o{ story_section_assets : has
 ```
 
 ### 核心表结构
-- **users**: 用户账户信息
+- **users**: 用户账户信息（含 role 角色字段）
 - **chat_sessions**: 聊天会话（绑定 story_id）
 - **messages**: 会话内的用户与 AI 消息
 - **stories**: 漫剧主记录（标题、摘要、大纲、风格、状态）
 - **characters**: 主要角色设定
 - **story_volume_outlines**: 分卷大纲（一 story 多卷）
 - **story_volume_sections**: 分卷小节故事（一卷多节）
+- **story_section_scripts**: 小节分镜脚本（一节多镜头）
 - **story_assets**: 人物/场景资产（图片、音频、描述）
 - **story_section_assets**: 小节与资产的多对多关联
+- **story_outline_options**: 大纲配置（题材和风格选项）
+- **ai_prompts**: AI 提示词模板（支持特定匹配）
+- **ai_prompt_parameters**: 提示词参数说明
 
 ### 故事状态流转
 ```
@@ -238,6 +275,7 @@ draft → revising → draft (大纲修改完成)
 draft → volume_pending → draft (分卷生成完成)
 draft → volume_section_pending → draft (小节生成完成)
 draft → section_asset_pending → draft (资产图片生成完成)
+draft → section_script_pending → draft (分镜脚本生成完成)
 任意状态 → failed (任务失败)
 ```
 
@@ -265,11 +303,24 @@ draft → section_asset_pending → draft (资产图片生成完成)
 - `PUT /api/story/{id}/volume-outline` - 手动修改分卷大纲
 - `POST /api/story/{id}/volume-outline/{volumeId}/sections/generate` - 生成小节故事（异步）
 - `POST /api/story/{id}/volume-sections/{sectionId}/assets/generate` - 生成小节资产图片（异步）
+- `POST /api/story/{id}/volume-sections/{sectionId}/script/generate` - 生成分镜脚本（异步）
 - `POST /api/story/{id}/assets/{assetId}/audio` - 上传人物音频
 - `GET /api/story/{id}` - 获取漫剧详情
 - `GET /api/story/list` - 获取漫剧列表
 - `PUT /api/story/{id}` - 更新漫剧
 - `DELETE /api/story/{id}` - 删除漫剧
+
+### 管理接口
+- `GET /api/story-outline-options` - 获取大纲配置列表
+- `POST /api/story-outline-options` - 新增大纲配置（ADMIN+）
+- `PUT /api/story-outline-options/{id}` - 修改大纲配置（ADMIN+）
+- `DELETE /api/story-outline-options/{id}` - 删除大纲配置（ADMIN+）
+- `GET /api/prompts` - 获取提示词列表（ADMIN+）
+- `POST /api/prompts` - 新增提示词（ADMIN+）
+- `PUT /api/prompts/{id}` - 修改提示词（ADMIN+）
+- `DELETE /api/prompts/{id}` - 删除提示词（ADMIN+）
+- `GET /api/users` - 获取用户列表（ROOT）
+- `PUT /api/users/{id}/role` - 修改用户角色（ROOT）
 
 ### 文件服务
 - `POST /api/files/upload` - 文件上传（需认证）
@@ -334,8 +385,15 @@ python main.py                    # 启动 FastAPI + RabbitMQ Worker
    - 确认 `storage/generated-assets/` 目录存在且有写入权限
    - 确认豆包 API Key 有效
 
-7. **小节生成返回 500**
-   - 确认已执行 `20260521_expand_stories_status_length.sql` 扩展 status 字段长度
+7. **LLM 调用偶发失败**
+   - Python 已内置自动重试机制（最多 3 次，指数退避）
+   - 查看控制台 `llm transient error, retrying...` 日志
+   - 如果 3 次重试后仍失败，说明上游服务暂时不可用
+
+8. **提示词未生效**
+   - 确认已执行 `20260522_create_ai_prompts.sql` 和 `20260522_add_ai_prompt_specific_matching.sql`
+   - 确认 Python 已安装 `pymysql`：`pip install pymysql`
+   - 如果数据库不可用，Python 会自动回退到 `prompt.py` 文件
 
 ## 项目进度
 
