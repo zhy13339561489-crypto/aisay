@@ -1155,3 +1155,36 @@ sequenceDiagram
 - `story_ai_pkg/scripts.py`：小节故事脚本结构化生成。
 
 这个拆分让非对话 AI 能力仍然共享同一个 FastAPI router 和 RabbitMQ worker 入口，但每类能力的代码边界更清楚。后续如果继续增加视频生成、音频合成或镜头图片生成，建议新增独立模块，例如 `video.py` 或 `shot_images.py`，再由 `story_ai_pkg/__init__.py` 做公共导出。
+
+### 大纲题材与漫剧风格配置模块
+
+生成剧情大纲时的“题材”和“漫剧风格”已经从前端写死选项拆成 Java 后端业务配置。该模块不调用 Python、不经过 RabbitMQ，也不参与大模型链路；它只负责维护可选项，真正生成剧情大纲时仍然由 `StoryServiceImpl.generateStory` 把用户选中的字符串保存到 `stories.genre` 和 `stories.style`。
+
+```mermaid
+sequenceDiagram
+    participant Admin as 大纲配置页
+    participant Java as StoryOutlineOptionController
+    participant Service as StoryOutlineOptionService
+    participant DB as story_outline_options
+    participant Chat as 生成剧情大纲弹窗
+
+    Admin->>Java: POST/PUT/DELETE /api/story-outline-options
+    Java->>Service: 校验类型、名称唯一、排序和启用状态
+    Service->>DB: 写入 story_outline_options
+    Chat->>Java: GET /api/story-outline-options?enabled=true
+    Java->>DB: 查询 GENRE/STYLE 可用配置
+    Java-->>Chat: 返回题材和风格下拉选项
+```
+
+数据职责如下：
+- `story_outline_options`：全局配置表，`option_type=GENRE` 表示漫剧大纲题材，`option_type=STYLE` 表示漫剧风格。
+- `sort_order`：控制前端下拉和管理表格中的展示顺序。
+- `enabled`：控制是否出现在“生成剧情大纲”弹窗；停用不会影响已经生成的故事。
+- `stories.genre` / `stories.style`：故事主表中的最终业务快照，保存用户创建故事时实际选择或手动输入的文本。
+
+前端职责如下：
+- `OutlineOptionManageView`：提供题材/漫剧风格的新增、编辑、启停和删除入口。
+- `outlineOptionStore`：封装配置项加载和保存状态，供管理页和生成剧情大纲弹窗复用。
+- `ChatView`：打开生成剧情大纲弹窗时加载已启用配置，并允许用户临时手动输入未配置的题材或风格。
+
+这个拆分的好处是配置维护可以快速迭代，不需要重启或修改 AI 提示词；同时故事记录保留字符串快照，后续删除或改名配置项不会破坏历史故事数据。

@@ -45,6 +45,11 @@ const routes: RouteRecordRaw[] = [
         component: () => import('../views/StoryList.vue'),
       },
       {
+        path: 'outline-options',
+        name: 'outline-options',
+        component: () => import('../views/OutlineOptionManageView.vue'),
+      },
+      {
         path: 'story/:id',
         name: 'story-detail',
         component: () => import('../views/StoryDetailView.vue'),

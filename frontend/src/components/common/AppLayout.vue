@@ -12,6 +12,7 @@
       <nav class="nav-links" aria-label="主导航">
         <RouterLink to="/chat">对话</RouterLink>
         <RouterLink to="/stories">漫剧列表</RouterLink>
+        <RouterLink to="/outline-options">大纲配置</RouterLink>
       </nav>
 
       <el-dropdown trigger="click" @command="handleUserCommand">

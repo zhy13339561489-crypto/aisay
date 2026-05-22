@@ -1562,3 +1562,34 @@
 ### 需要你做的事情
 - [ ] 重启 Python FastAPI，让新的 `story_ai_pkg` 包结构生效。
 - [ ] Java 后端和前端不需要因为这次拆分单独重启；如果你同时还没有应用上一节“小节故事脚本生成”的 Java/SQL 改动，则仍需按上一节要求执行 SQL 并重启 Java。
+
+## 2026-05-22 漫剧大纲题材与漫剧风格管理模块
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260522_create_story_outline_options.sql`，创建 `story_outline_options` 配置表。
+- [x] 配置表按 `option_type` 区分 `GENRE` 题材和 `STYLE` 漫剧风格，同类型下 `name` 唯一。
+- [x] SQL 中预置常用题材和漫剧风格，执行时使用 `ON DUPLICATE KEY UPDATE`，重复执行不会重复插入。
+- [x] 同步更新 `backend/src/main/resources/db/init.sql`，新环境初始化时会包含该配置表和默认数据。
+
+### 后端
+- [x] 新增 `StoryOutlineOption` 实体、`StoryOutlineOptionMapper`、请求 DTO 和响应 DTO。
+- [x] 新增 `StoryOutlineOptionService` 与实现类，支持按类型/启用状态查询、新增、修改、删除。
+- [x] 新增接口 `GET /api/story-outline-options`，前端生成剧情大纲弹窗可加载已启用的题材和风格。
+- [x] 新增接口 `POST /api/story-outline-options`、`PUT /api/story-outline-options/{id}`、`DELETE /api/story-outline-options/{id}`，用于管理模块维护配置。
+- [x] 该模块完全由 Java 后端处理，不调用 Python，不投递 RabbitMQ，不参与大模型生成流程。
+
+### 前端
+- [x] 新增 `outlineOptionApi.ts`、`outlineOptionStore.ts` 和 `outlineOption.ts` 类型定义。
+- [x] 新增“大纲配置”页面，支持题材/漫剧风格切换、新增、编辑、启停和删除。
+- [x] 顶部导航新增“大纲配置”入口，路由为 `/outline-options`。
+- [x] `ChatView` 生成剧情大纲弹窗中的题材和漫剧风格下拉，已从写死选项改为读取后端已启用配置。
+- [x] 生成剧情大纲仍保留手动输入能力，避免临时题材/风格被配置列表卡住。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml -q compile`。
+- [x] 前端构建成功：`npm run build`。
+- [x] 前端构建仍有 Sass legacy JS API、Rollup 注释和大 chunk 警告，属于既有非阻断警告。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260522_create_story_outline_options.sql`。
+- [ ] 重启 Java 后端，让新增配置表映射和 `/api/story-outline-options` 接口生效。
+- [ ] 重新打开前端，进入“大纲配置”维护题材/漫剧风格；之后“生成剧情大纲”弹窗会加载已启用配置。

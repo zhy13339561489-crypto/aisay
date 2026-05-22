@@ -125,13 +125,12 @@
             default-first-option
             placeholder="请选择或输入题材"
           >
-            <el-option label="科幻" value="科幻" />
-            <el-option label="奇幻" value="奇幻" />
-            <el-option label="悬疑" value="悬疑" />
-            <el-option label="爱情" value="爱情" />
-            <el-option label="热血" value="热血" />
-            <el-option label="都市" value="都市" />
-            <el-option label="校园" value="校园" />
+            <el-option
+              v-for="option in outlineOptionStore.genreOptions"
+              :key="option.id"
+              :label="option.name"
+              :value="option.name"
+            />
           </el-select>
         </el-form-item>
         <el-form-item label="漫剧风格" prop="style">
@@ -142,13 +141,12 @@
             default-first-option
             placeholder="请选择或输入统一视觉风格"
           >
-            <el-option label="国漫电影感" value="国漫电影感" />
-            <el-option label="日系赛璐璐" value="日系赛璐璐" />
-            <el-option label="厚涂奇幻" value="厚涂奇幻" />
-            <el-option label="黑白悬疑漫画" value="黑白悬疑漫画" />
-            <el-option label="赛博朋克霓虹" value="赛博朋克霓虹" />
-            <el-option label="水彩治愈系" value="水彩治愈系" />
-            <el-option label="复古港漫" value="复古港漫" />
+            <el-option
+              v-for="option in outlineOptionStore.styleOptions"
+              :key="option.id"
+              :label="option.name"
+              :value="option.name"
+            />
           </el-select>
           <p class="form-hint">该风格会作为后续图片生成和视频生成的统一视觉风格。</p>
         </el-form-item>
@@ -181,6 +179,7 @@ import MessageBubble from '../components/chat/MessageBubble.vue';
 import InputArea from '../components/chat/InputArea.vue';
 import SessionList from '../components/chat/SessionList.vue';
 import { useChatStore } from '../stores/chatStore';
+import { useOutlineOptionStore } from '../stores/outlineOptionStore';
 import { useStoryStore } from '../stores/storyStore';
 
 const props = defineProps<{
@@ -189,6 +188,7 @@ const props = defineProps<{
 
 const router = useRouter();
 const chatStore = useChatStore();
+const outlineOptionStore = useOutlineOptionStore();
 const storyStore = useStoryStore();
 const messageContainerRef = ref<HTMLElement>();
 const isCreating = ref(false);
@@ -245,6 +245,7 @@ async function initializeChatPage() {
   try {
     await Promise.all([
       chatStore.loadSessions(),
+      outlineOptionStore.fetchEnabledOptions(),
       storyStore.fetchStories(1, 100),
     ]);
     await syncRouteSession(props.sessionId);
@@ -342,14 +343,15 @@ async function handleSendMessage(content: string) {
 }
 
 async function handleGenerateStory() {
-  openStoryOutlineDialog();
+  await openStoryOutlineDialog();
 }
 
-function openStoryOutlineDialog() {
+async function openStoryOutlineDialog() {
   outlineForm.genre = '';
   outlineForm.style = '';
   outlineForm.plot = '';
   outlineDialogVisible.value = true;
+  await outlineOptionStore.fetchEnabledOptions();
 }
 
 async function submitStoryOutline() {
