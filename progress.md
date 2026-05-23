@@ -1893,3 +1893,26 @@
 ### 需要你做的事情
 - [ ] 如果之前已经执行过 `backend/src/main/resources/db/20260523_create_intelligent_chat_prompts.sql`，请重新执行该 SQL，或在 Prompt 管理里手动更新 `chat_router`，让数据库中的路由 Prompt 也知道 `feature_permission` 模块。
 - [ ] 重启 Java 后端和 Python FastAPI，让新的对话白名单、Tool 和路由逻辑生效。
+
+## 2026-05-23 大模型结构化 JSON 输出健壮性
+### 通用运行时
+- [x] `python-ai/ai_runtime.py` 新增 `invoke_structured_output_with_guard`，统一保护所有 `with_structured_output(...)` 调用。
+- [x] 执行流程改为：调用大模型 -> 校验 Pydantic 结构 -> 失败时提取异常中的原始 JSON -> 本地修复 JSON -> 再次校验。
+- [x] 本地修复覆盖常见问题：Markdown 代码块包裹、截断导致字符串/对象未闭合、字符串中的原始换行、正文中未转义的双引号。
+- [x] 如果本地修复失败，会重新调用大模型生成并再次验证；总生成次数最多 3 次，3 次仍失败则抛出真实异常，让 RabbitMQ 任务返回失败。
+- [x] 网络断开、502/503/504、连接重置等临时上游错误仍走原有 `invoke_llm_with_retry` 网络重试，不和 JSON 结构重试混在一起。
+### 已接入链路
+- [x] 剧情大纲生成 `NovelOutlineOutput` 和剧情大纲修改 `OutlineRevisionOutput`。
+- [x] 分卷数量规划 `VolumeCountOutput`、逐卷分卷大纲 `VolumeOutlineItem`、分卷大纲修改 `VolumeOutlineOutput`。
+- [x] 小节数量规划 `VolumeSectionCountOutput`。
+- [x] 小节人物/场景资产识别 `SectionAssetExtractionOutput`。
+- [x] 小节分镜脚本生成 `StorySectionScriptGenerateResponse`。
+- [x] 对话系统的指代消解 `CoreferenceOutput`、意图路由 `RouteOutput`、记忆摘要 `MemoryUpdateOutput`。
+### 验证结果
+- [x] Python 导入检查成功：`import story_ai, chat_ai, ai_runtime`。
+- [x] 本地模拟“endingHook 字符串未闭合”的坏 JSON，可被修复并通过 `VolumeOutlineItem` 验证。
+- [x] 本地模拟正文中未转义双引号的坏 JSON，可被修复并通过 `VolumeSectionItem` 验证。
+- [x] `git diff --check` 无格式错误，仅有既有 LF/CRLF 提示。
+### 需要你做的事情
+- [ ] 重启 Python FastAPI / RabbitMQ worker，让结构化 JSON 输出保护生效。
+- [ ] 如果同一个任务 3 次结构化生成都失败，说明模型或 Prompt 持续输出不可修复内容，请把 worker 日志中的 `structured output validation failed after 3 attempts` 贴出来继续定位。

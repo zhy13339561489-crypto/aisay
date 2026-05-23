@@ -5,6 +5,12 @@
 # os：用于设置环境变量，通义千问和豆包 SDK 通过环境变量读取 API Key
 import os
 
+# json：用于校验和修复大模型返回的 JSON 结构化输出
+import json
+
+# re：用于从 LangChain 结构化输出异常中提取原始 JSON 参数
+import re
+
 # time：用于计算请求耗时，打印进度日志
 import time
 
@@ -13,6 +19,9 @@ import random
 
 # pathlib.Path：用于定位 api.yml 配置文件路径
 from pathlib import Path
+
+# typing.Any：用于声明通用结构化输出类型
+from typing import Any
 
 # yaml：用于解析 api.yml 中的 YAML 格式配置
 import yaml
@@ -318,6 +327,256 @@ def invoke_llm_with_retry(
             )
             time.sleep(delay)
             attempt += 1
+
+
+def invoke_structured_output_with_guard(
+    chain,
+    payload: dict,
+    output_model: type,
+    *,
+    config: dict | None = None,
+    trace_id: str = "-",
+    started_at: float | None = None,
+    scope: str = "llm",
+    max_generation_attempts: int = 3,
+):
+    """Invoke a structured-output chain with JSON validation, local repair, and bounded regeneration.
+
+    This guard protects calls using ``with_structured_output(...)``. Some providers occasionally
+    return malformed tool-call JSON, for example an unterminated string in a long ``content`` field.
+    The flow is:
+    1. Invoke the chain and validate the returned object against ``output_model``.
+    2. If LangChain exposes malformed JSON in the exception, try a local JSON repair and validate it.
+    3. If repair fails, regenerate. At most ``max_generation_attempts`` model generations are made.
+    4. If all generations fail validation, re-raise the final exception as a real failure.
+    """
+    timer = started_at if started_at is not None else time.perf_counter()
+    attempts = max(max_generation_attempts, 1)
+    last_error: Exception | None = None
+
+    for attempt in range(1, attempts + 1):
+        try:
+            if attempt > 1:
+                log_progress(trace_id, f"structured output regeneration attempt {attempt}/{attempts} started", timer, scope)
+            result = invoke_llm_with_retry(
+                chain,
+                payload,
+                config=config,
+                trace_id=trace_id,
+                started_at=timer,
+                scope=scope,
+            )
+            return validate_structured_output(result, output_model)
+        except Exception as exc:
+            last_error = exc
+
+            repaired = repair_structured_output_from_exception(exc, output_model)
+            if repaired is not None:
+                log_progress(trace_id, f"structured output repaired locally on attempt {attempt}/{attempts}", timer, scope)
+                return repaired
+
+            # Network/upstream failures are already retried by invoke_llm_with_retry. Do not turn
+            # them into extra structured-output regenerations, otherwise a real outage may fan out
+            # into many slow attempts.
+            if is_retryable_llm_error(exc):
+                raise
+
+            if attempt >= attempts:
+                log_progress(trace_id, f"structured output validation failed after {attempts} attempts: {exc}", timer, scope)
+                raise
+
+            log_progress(
+                trace_id,
+                f"structured output invalid and repair failed; regenerating ({attempt}/{attempts}): {exc}",
+                timer,
+                scope,
+            )
+
+    raise last_error  # pragma: no cover; loop always returns or raises before this point.
+
+
+def validate_structured_output(value: Any, output_model: type):
+    """Validate a structured LLM value against the expected Pydantic model."""
+    if isinstance(value, output_model):
+        return value
+
+    if hasattr(value, "model_dump"):
+        value = value.model_dump(by_alias=True)
+    elif hasattr(value, "dict"):
+        value = value.dict(by_alias=True)
+
+    if hasattr(output_model, "model_validate"):
+        return output_model.model_validate(value)
+    return output_model.parse_obj(value)
+
+
+def repair_structured_output_from_exception(error: Exception, output_model: type):
+    """Try to repair malformed JSON embedded in a LangChain structured-output exception."""
+    raw_json = extract_malformed_json_from_exception(error)
+    if not raw_json:
+        return None
+
+    repaired_data = parse_json_with_repair(raw_json)
+    if repaired_data is None:
+        return None
+
+    try:
+        return validate_structured_output(repaired_data, output_model)
+    except Exception:
+        return None
+
+
+def extract_malformed_json_from_exception(error: Exception) -> str | None:
+    """Extract the raw JSON-like tool-call arguments from common LangChain parser errors."""
+    message = str(error)
+    patterns = [
+        r"arguments:\s*(.*?)\s*are not valid JSON",
+        r"Invalid json output:\s*(.*)",
+        r"Could not parse.*?json.*?:\s*(.*)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, message, re.DOTALL | re.IGNORECASE)
+        if match:
+            return match.group(1).strip()
+    return None
+
+
+def parse_json_with_repair(raw_text: str) -> Any | None:
+    """Parse JSON, applying small deterministic repairs for common LLM formatting mistakes."""
+    candidates = build_json_repair_candidates(raw_text)
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+    return None
+
+
+def build_json_repair_candidates(raw_text: str) -> list[str]:
+    """Build increasingly repaired JSON candidates from raw LLM output."""
+    stripped = strip_json_markdown_fence(raw_text).strip()
+    extracted = extract_outer_json_candidate(stripped)
+    quote_escaped = escape_unescaped_quotes_and_controls(extracted)
+    completed = complete_truncated_json(extracted)
+    quote_escaped_completed = complete_truncated_json(quote_escaped)
+
+    candidates: list[str] = []
+    for candidate in [stripped, extracted, quote_escaped, completed, quote_escaped_completed]:
+        if candidate and candidate not in candidates:
+            candidates.append(candidate)
+    return candidates
+
+
+def strip_json_markdown_fence(text: str) -> str:
+    """Remove a surrounding Markdown code fence if the model emitted one."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        stripped = re.sub(r"^```(?:json)?\s*", "", stripped, flags=re.IGNORECASE)
+        stripped = re.sub(r"\s*```$", "", stripped)
+    return stripped.strip()
+
+
+def extract_outer_json_candidate(text: str) -> str:
+    """Keep the text from the first JSON opener to the last JSON closer when possible."""
+    first_object = text.find("{")
+    first_array = text.find("[")
+    starts = [index for index in [first_object, first_array] if index >= 0]
+    if not starts:
+        return text
+    start = min(starts)
+
+    last_object = text.rfind("}")
+    last_array = text.rfind("]")
+    end = max(last_object, last_array)
+    if end > start:
+        return text[start:end + 1]
+    return text[start:]
+
+
+def escape_unescaped_quotes_and_controls(text: str) -> str:
+    """Escape raw newlines and quote characters that appear inside JSON strings."""
+    output: list[str] = []
+    in_string = False
+    escaped = False
+    length = len(text)
+
+    for index, char in enumerate(text):
+        if not in_string:
+            output.append(char)
+            if char == '"':
+                in_string = True
+                escaped = False
+            continue
+
+        if escaped:
+            output.append(char)
+            escaped = False
+            continue
+
+        if char == "\\":
+            output.append(char)
+            escaped = True
+            continue
+
+        if char == '"':
+            next_non_space = next((text[pos] for pos in range(index + 1, length) if not text[pos].isspace()), "")
+            if next_non_space in {":", ",", "}", "]", ""}:
+                output.append(char)
+                in_string = False
+            else:
+                output.append('\\"')
+            continue
+
+        if char == "\n":
+            output.append("\\n")
+        elif char == "\r":
+            output.append("\\r")
+        elif char == "\t":
+            output.append("\\t")
+        else:
+            output.append(char)
+
+    return "".join(output)
+
+
+def complete_truncated_json(text: str) -> str:
+    """Close a truncated JSON object/array/string when the ending was cut off."""
+    in_string = False
+    escaped = False
+    stack: list[str] = []
+
+    for char in text:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            stack.append("}")
+        elif char == "[":
+            stack.append("]")
+        elif char in {"}", "]"} and stack and stack[-1] == char:
+            stack.pop()
+
+    suffix = ""
+    if in_string:
+        stripped_length = len(text.rstrip())
+        trailing_whitespace = text[stripped_length:]
+        if stack and stripped_length > 0 and text[stripped_length - 1] == stack[-1]:
+            expected_closer = stack.pop()
+            return text[:stripped_length - 1] + '"' + expected_closer + trailing_whitespace + "".join(reversed(stack))
+        if text.rstrip().endswith("\\"):
+            suffix += "\\"
+        suffix += '"'
+    if stack:
+        suffix += "".join(reversed(stack))
+    return text + suffix
 
 
 def is_retryable_llm_error(error: Exception) -> bool:

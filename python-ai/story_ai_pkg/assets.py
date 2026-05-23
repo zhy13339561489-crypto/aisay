@@ -25,7 +25,13 @@ from urllib.request import urlopen
 from fastapi import HTTPException
 
 # 从 ai_runtime 导入共享的 LLM 实例和工具函数
-from ai_runtime import ConsoleStreamingCallback, get_doubao_image_client, invoke_llm_with_retry, llm_temperature_0, log_progress
+from ai_runtime import (
+    ConsoleStreamingCallback,
+    get_doubao_image_client,
+    invoke_structured_output_with_guard,
+    llm_temperature_0,
+    log_progress,
+)
 
 # 从 formatters 导入文本格式化工具
 from .formatters import build_characters_text
@@ -536,7 +542,7 @@ def resolve_section_assets(
     log_progress(trace_id, f"extracting assets for section {section.section_number}", started_at, scope)
 
     # 调用大模型识别资产
-    extraction = invoke_llm_with_retry(
+    extraction = invoke_structured_output_with_guard(
         extraction_chain,
         {
             "Title": request.title,
@@ -553,6 +559,7 @@ def resolve_section_assets(
             "SectionContent": section.content,
             "ExistingAssets": format_existing_asset_context(asset_registry),
         },
+        SectionAssetExtractionOutput,
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
         trace_id=trace_id,
         started_at=started_at,

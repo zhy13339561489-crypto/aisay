@@ -17,7 +17,14 @@ from collections.abc import Callable
 from fastapi import HTTPException
 
 # 从 ai_runtime 导入共享的 LLM 实例和工具函数
-from ai_runtime import ConsoleStreamingCallback, invoke_llm_with_retry, log_progress, llm_temperature_0, structured_llm_base
+from ai_runtime import (
+    ConsoleStreamingCallback,
+    invoke_llm_with_retry,
+    invoke_structured_output_with_guard,
+    log_progress,
+    llm_temperature_0,
+    structured_llm_base,
+)
 
 # 从 formatters 导入文本格式化工具
 from .formatters import build_characters_text, extract_llm_text, format_volume_outline_context
@@ -89,7 +96,7 @@ def generate_volume_outline(
     ) | count_llm
     log_progress(trace_id, "planning total volume count with temperature=0 structured output", started_at, scope)
 
-    count_result = invoke_llm_with_retry(
+    count_result = invoke_structured_output_with_guard(
         count_chain,
         {
             "Title": request.title,
@@ -99,6 +106,7 @@ def generate_volume_outline(
             "Outline": request.outline,
             "Characters": characters_text,
         },
+        VolumeCountOutput,
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
         trace_id=trace_id,
         started_at=started_at,
@@ -124,7 +132,7 @@ def generate_volume_outline(
         log_progress(trace_id, f"generating volume {volume_number}/{total_volumes}", started_at, scope)
 
         # 调用大模型生成当前卷
-        volume = invoke_llm_with_retry(
+        volume = invoke_structured_output_with_guard(
             single_volume_chain,
             {
                 "Title": request.title,
@@ -138,6 +146,7 @@ def generate_volume_outline(
                 # 将已生成的前序分卷作为上下文传入，保证连续性
                 "GeneratedVolumeOutlines": format_volume_outline_context(generated_volumes),
             },
+            VolumeOutlineItem,
             config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
             trace_id=trace_id,
             started_at=started_at,
@@ -222,7 +231,7 @@ def revise_volume_outline(request: StoryVolumeOutlineReviseRequest) -> StoryVolu
     log_progress(trace_id, "structured volume revision chain created, invoking Tongyi model in non-streaming mode", started_at, scope)
 
     # 调用大模型
-    result = invoke_llm_with_retry(
+    result = invoke_structured_output_with_guard(
         chain,
         {
             "Title": request.title,
@@ -234,6 +243,7 @@ def revise_volume_outline(request: StoryVolumeOutlineReviseRequest) -> StoryVolu
             "ExistingVolumeOutline": existing_volume_outline,   # 现有分卷大纲
             "ModificationRequest": request.suggestion,          # 用户修改意见
         },
+        VolumeOutlineOutput,
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
         trace_id=trace_id,
         started_at=started_at,

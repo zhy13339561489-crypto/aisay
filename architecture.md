@@ -1462,3 +1462,16 @@ Java 后端仍是最终执行边界：`ChatServiceImpl` 只允许 `featurePermis
 - 查询：`featurePermission.list` 不需要额外参数，返回所有功能 key、名称、允许角色和启用状态。
 - 修改：`featurePermission.update` 支持用 `featureKey` 或 `id` 定位功能，`allowedRoles` 支持数组或字符串，`enabled` 可选；root 会被服务层自动保留，避免误配置导致无人可管理。
 - Prompt：如果数据库中已存在旧版 `chat_router`，需要同步更新 `20260523_create_intelligent_chat_prompts.sql` 或在 Prompt 管理中手动加入 `feature_permission` 模块说明，否则大模型可能仍按旧路由理解。
+
+### 结构化 JSON 输出保护
+
+所有需要大模型返回 JSON/Pydantic 结构的链路统一通过 `ai_runtime.invoke_structured_output_with_guard` 调用。这个封装位于 LangChain `with_structured_output(...)` 外层，负责把“模型生成”和“结构验证”从普通网络重试中区分开。
+
+处理顺序如下：
+- 第一步：调用结构化输出链，成功返回后再次用目标 Pydantic 模型验证。
+- 第二步：如果 LangChain 抛出 “arguments are not valid JSON” 之类异常，从异常文本中提取原始 JSON 参数。
+- 第三步：本地尝试修复常见坏 JSON，包括代码块包裹、字符串未闭合、对象/数组未闭合、原始换行、正文未转义双引号。
+- 第四步：修复后的 JSON 必须再次通过 Pydantic 模型验证；验证通过才会继续业务流程。
+- 第五步：修复失败则重新生成，最多生成 3 次；3 次都无法得到合法结构时抛出真实失败，由 RabbitMQ worker 发布 `success=false`。
+
+该保护已覆盖剧情大纲、分卷大纲、小节数量、资产识别、分镜脚本以及智能对话的指代消解/路由/记忆摘要。分卷正文和小节正文这类长篇正文生成仍使用纯文本格式，避免强制 JSON 转义导致长文本更容易损坏。

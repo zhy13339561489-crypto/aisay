@@ -17,7 +17,14 @@ from collections.abc import Callable
 from fastapi import HTTPException
 
 # 从 ai_runtime 导入共享的 LLM 实例和工具函数
-from ai_runtime import ConsoleStreamingCallback, invoke_llm_with_retry, llm_temperature_0, log_progress, streaming_text_llm_base
+from ai_runtime import (
+    ConsoleStreamingCallback,
+    invoke_llm_with_retry,
+    invoke_structured_output_with_guard,
+    llm_temperature_0,
+    log_progress,
+    streaming_text_llm_base,
+)
 
 # 从 formatters 导入文本格式化工具
 from .formatters import (
@@ -106,7 +113,7 @@ def generate_volume_sections(
     ) | count_llm
     log_progress(trace_id, "planning section count with temperature=0 structured output", started_at, scope)
 
-    count_result = invoke_llm_with_retry(
+    count_result = invoke_structured_output_with_guard(
         count_chain,
         {
             "Title": request.title,
@@ -121,6 +128,7 @@ def generate_volume_sections(
             "VolumeContent": request.volume_outline.content,
             "EndingHook": request.volume_outline.ending_hook or "",
         },
+        VolumeSectionCountOutput,
         config={"callbacks": [ConsoleStreamingCallback(trace_id, scope)]},
         trace_id=trace_id,
         started_at=started_at,

@@ -7,7 +7,7 @@
 import json
 
 # 从 ai_runtime 导入 LLM 实例和重试调用函数
-from ai_runtime import Router, invoke_llm_with_retry
+from ai_runtime import Router, invoke_structured_output_with_guard
 
 # 从 prompt_repository 导入提示词模板加载函数
 from story_ai_pkg.prompt_repository import get_prompt_template
@@ -56,7 +56,7 @@ def update_memory(
         ) | Router.with_structured_output(MemoryUpdateOutput)
 
         # 调用大模型进行记忆压缩
-        return invoke_llm_with_retry(
+        return invoke_structured_output_with_guard(
             chain,
             {
                 "ExistingLongTermMemory": request.long_term_memory or "无",       # 已有长期记忆
@@ -65,6 +65,7 @@ def update_memory(
                 "CurrentMessage": resolved_message,                               # 当前用户消息
                 "ImportantInfo": json.dumps(route.important_info or {}, ensure_ascii=False),  # 本轮提取的关键信息
             },
+            MemoryUpdateOutput,
             trace_id=trace_id,
             started_at=started_at,
             scope="chat-memory",  # 日志前缀

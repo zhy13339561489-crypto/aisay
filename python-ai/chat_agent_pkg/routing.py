@@ -7,7 +7,7 @@
 import json
 
 # 从 ai_runtime 导入 LLM 实例和重试调用函数
-from ai_runtime import Router, invoke_llm_with_retry
+from ai_runtime import Router, invoke_structured_output_with_guard
 
 # 从 prompt 导入兜底提示词
 from prompt import prompt_ChatAgent
@@ -67,7 +67,7 @@ def resolve_coreference(request: ChatAgentRequest, trace_id: str, started_at: fl
     ) | Router.with_structured_output(CoreferenceOutput)
 
     # 调用大模型
-    return invoke_llm_with_retry(
+    return invoke_structured_output_with_guard(
         chain,
         {
             "RecentMessages": format_messages(request.recent_messages),  # 近期消息
@@ -75,6 +75,7 @@ def resolve_coreference(request: ChatAgentRequest, trace_id: str, started_at: fl
             "KeyFacts": json.dumps(request.key_facts or {}, ensure_ascii=False),  # 关键事实
             "UserMessage": request.user_message,                        # 用户消息
         },
+        CoreferenceOutput,
         trace_id=trace_id,
         started_at=started_at,
         scope="chat-coreference",  # 日志前缀
@@ -114,7 +115,7 @@ def route_message(
     ) | Router.with_structured_output(RouteOutput)
 
     # 调用大模型
-    route = invoke_llm_with_retry(
+    route = invoke_structured_output_with_guard(
         chain,
         {
             "UserRole": request.user_role,                                      # 用户角色
@@ -123,6 +124,7 @@ def route_message(
             "ResolvedMessage": resolved_message,                                # 消解后消息
             "AvailableModules": "manga, outline_config, prompt_management, user_permission, feature_permission, general",  # 可用模块
         },
+        RouteOutput,
         trace_id=trace_id,
         started_at=started_at,
         scope="chat-router",  # 日志前缀
