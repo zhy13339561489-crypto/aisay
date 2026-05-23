@@ -15,6 +15,8 @@
 - **智能记忆管理**：Redis 短期记忆 + 长期记忆压缩 + 关键事实提取，支持跨会话上下文理解
 - **提示词动态管理**：数据库配置提示词，按题材/风格精确匹配特定提示词
 - **用户权限系统**：ROOT/ADMIN/USER 三级角色，分级管理功能权限
+- **功能权限管理**：细粒度控制各功能模块的访问权限，支持按功能开启/关闭
+- **结构化输出防护**：LLM 结构化 JSON 输出自动修复，覆盖截断、转义、格式错误等异常
 - **模块化架构**：前后端分离，AI 引擎独立部署，易于扩展和维护
 
 ## 系统架构
@@ -240,12 +242,26 @@ aisay/
 - 生成大纲弹窗从数据库动态加载选项列表
 - 支持新增、编辑、启停和删除
 
-### 10. 异步任务架构
+### 10. 功能权限管理
+- 细粒度功能级权限控制，覆盖对话、漫剧、大纲配置、提示词管理等所有模块
+- ROOT 可在管理页面按功能设置允许的角色等级
+- 前端根据功能权限动态显示/隐藏菜单入口
+- 对话 Agent 路由时同步检查功能权限，未授权功能自动拒绝
+
+### 11. 异步任务架构
 - RabbitMQ 消息队列驱动所有非对话 AI 任务
 - Java 提交任务后立即返回，Python 后台异步处理
 - 支持 partial/completed 消息，实现增量结果回传
 - LLM 调用自动重试（网络超时、5xx 错误）
+- 结构化 JSON 输出自动修复（截断、转义、格式错误）
 - 前端轮询获取最新结果
+
+### 12. LLM 结构化输出防护
+- 统一防护函数 `invoke_structured_output_with_guard`，保护所有 `with_structured_output` 调用
+- Pydantic 校验失败时自动提取原始 JSON 并本地修复
+- 覆盖常见问题：Markdown 代码块包裹、字符串未闭合、未转义双引号
+- 修复失败后重新调用大模型，最多重试 3 次
+- 网络错误和 JSON 结构错误分开处理，互不干扰
 
 ## 数据库设计
 
@@ -269,7 +285,7 @@ erDiagram
 
 ### 核心表结构
 - **users**: 用户账户信息（含 role 角色字段）
-- **chat_sessions**: 聊天会话（绑定 story_id）
+- **chat_sessions**: 聊天会话（可选绑定 story_id）
 - **messages**: 会话内的用户与 AI 消息
 - **stories**: 漫剧主记录（标题、摘要、大纲、风格、状态）
 - **characters**: 主要角色设定
@@ -281,6 +297,7 @@ erDiagram
 - **story_outline_options**: 大纲配置（题材和风格选项）
 - **ai_prompts**: AI 提示词模板（支持特定匹配）
 - **ai_prompt_parameters**: 提示词参数说明
+- **feature_permissions**: 功能权限配置（功能 key、允许角色、启用状态）
 
 ### 故事状态流转
 ```
@@ -335,6 +352,9 @@ draft → section_script_pending → draft (分镜脚本生成完成)
 - `DELETE /api/prompts/{id}` - 删除提示词（ADMIN+）
 - `GET /api/users` - 获取用户列表（ROOT）
 - `PUT /api/users/{id}/role` - 修改用户角色（ROOT）
+- `GET /api/feature-permissions` - 获取功能权限列表（ROOT）
+- `PUT /api/feature-permissions/{id}` - 修改功能权限（ROOT）
+- `GET /api/feature-permissions/me` - 获取当前用户可用功能
 
 ### 文件服务
 - `POST /api/files/upload` - 文件上传（需认证）
@@ -401,8 +421,15 @@ python main.py                    # 启动 FastAPI + RabbitMQ Worker
 
 7. **LLM 调用偶发失败**
    - Python 已内置自动重试机制（最多 3 次，指数退避）
+   - 网络错误和 JSON 结构错误分开处理，互不干扰
    - 查看控制台 `llm transient error, retrying...` 日志
    - 如果 3 次重试后仍失败，说明上游服务暂时不可用
+
+8. **结构化输出 JSON 解析失败**
+   - Python 已内置 `invoke_structured_output_with_guard` 防护函数
+   - 自动修复常见问题：Markdown 代码块、字符串未闭合、未转义引号
+   - 修复失败后会重新调用大模型，最多重试 3 次
+   - 查看控制台 `structured output validation failed after 3 attempts` 日志
 
 8. **提示词未生效**
    - 确认已执行 `20260522_create_ai_prompts.sql` 和 `20260522_add_ai_prompt_specific_matching.sql`
