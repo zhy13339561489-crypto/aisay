@@ -7,12 +7,13 @@
 这是一个全栈的AI漫剧生成系统，用户可以通过自然对话的形式与AI创作助手交互，逐步完善漫剧设定，最终生成包含角色、剧情、分镜、对白等完整内容的漫画剧本。
 
 **核心特性：**
-- **自然对话交互**：通过日常聊天形式收集创作需求，AI Agent 自动理解意图并调用对应能力
+- **智能对话交互**：多阶段 AI Agent 流水线（指代消解→意图路由→记忆管理→子Agent执行），自动理解用户意图并路由到对应操作
 - **渐进式生成**：多轮对话逐步细化角色、剧情、风格设定
 - **完整漫剧内容**：自动生成剧情大纲、分卷大纲、小节故事、分镜脚本
 - **AI 资产生成**：自动识别人物/场景，调用豆包生成三视图设定图和环境概念图
 - **异步任务架构**：RabbitMQ 消息队列驱动非对话 AI 任务，支持逐卷/逐节增量回传
-- **提示词动态管理**：支持数据库配置提示词，按题材/风格精确匹配特定提示词
+- **智能记忆管理**：Redis 短期记忆 + 长期记忆压缩 + 关键事实提取，支持跨会话上下文理解
+- **提示词动态管理**：数据库配置提示词，按题材/风格精确匹配特定提示词
 - **用户权限系统**：ROOT/ADMIN/USER 三级角色，分级管理功能权限
 - **模块化架构**：前后端分离，AI 引擎独立部署，易于扩展和维护
 
@@ -48,9 +49,9 @@
 ```
 
 **调用链路：**
-- **对话消息**：前端 → Java 后端 → Python Agent (HTTP) → Java 白名单分发 → 数据库
+- **对话消息**：前端 → Java 后端 → Python Agent (HTTP) → 指代消解 → 意图路由 → 记忆更新 → 子 Agent → Java 执行
 - **故事生成**：前端 → Java 后端 → RabbitMQ → Python Worker → RabbitMQ → Java 监听落库 → 前端轮询
-- **图片生成**：Python Worker → 豆包 API → 本地存储 → Java 文件服务 → 前端展示
+- **消息持久化**：前端 → Java 后端 → Redis 短期记忆 → RabbitMQ → MySQL 持久化
 
 ## 快速开始
 
@@ -124,14 +125,15 @@ aisay/
 │       ├── controller/             # REST API 控制器
 │       ├── service/                # 业务逻辑层
 │       ├── service/impl/           # 业务实现
-│       ├── repository/             # MyBatis-Plus Mapper
+│       ├── repository/             # MyBatis-Plus Mapper + Redis Repository
 │       ├── entity/                 # 数据库实体
 │       ├── dto/
 │       │   ├── request/            # 请求 DTO
 │       │   ├── response/           # 响应 DTO
-│       │   └── ai/                 # Java ↔ Python AI DTO
+│       │   ├── ai/                 # Java ↔ Python AI DTO
+│       │   └── chat/               # 聊天相关 DTO
 │       ├── config/                 # 配置类 (Security, RabbitMQ, Redis, etc.)
-│       └── utils/                  # 工具类 (JWT, 文件存储, AI 任务发布)
+│       └── utils/                  # 工具类 (JWT, 文件存储, AI 任务发布, 聊天持久化)
 │
 ├── frontend/                       # Vue 3 前端
 │   └── src/
@@ -159,7 +161,15 @@ aisay/
 │   │   ├── assets.py               # 人物/场景资产与豆包图片
 │   │   ├── scripts.py              # 分镜脚本生成
 │   │   └── router.py               # FastAPI 路由器
-│   ├── chat_ai.py                  # 对话 Agent API
+│   ├── chat_ai.py                  # 对话 Agent 入口
+│   ├── chat_agent_pkg/             # 智能对话 Agent 包
+│   │   ├── models.py               # 对话相关数据模型
+│   │   ├── prompts.py              # 对话提示词（指代消解、路由、记忆压缩、子Agent）
+│   │   ├── routing.py              # 指代消解与意图路由
+│   │   ├── memory.py               # 记忆管理（短期记忆压缩、关键事实合并）
+│   │   ├── sub_agents.py           # ReAct 子 Agent 执行
+│   │   ├── tools.py                # LangChain Tool 定义（各模块业务工具）
+│   │   └── permissions.py          # 角色权限校验
 │   ├── prompt.py                   # 提示词模板（数据库兜底）
 │   ├── rabbitmq_worker.py          # RabbitMQ 消费者
 │   ├── requirements.txt            # Python 依赖
@@ -176,11 +186,15 @@ aisay/
 - 三级角色权限：ROOT（超级管理员）、ADMIN（管理员）、USER（普通用户）
 - ROOT 可管理所有用户角色，ADMIN 可管理大纲配置和提示词
 
-### 2. 对话系统
-- 多轮对话会话管理
-- AI Agent 自动理解用户意图，路由到对应 Java 方法
+### 2. 智能对话系统
+- **多阶段 AI Agent 流水线**：
+  1. **指代消解**：将"它"、"这个"等指代词替换为具体实体
+  2. **意图路由**：判断用户意图，提取关键信息，路由到对应模块
+  3. **记忆更新**：Redis 短期记忆 + 长期记忆压缩 + 关键事实提取
+  4. **子 Agent 执行**：ReAct 模式选择工具，返回 Java 方法和参数
+- 支持无绑定漫剧的自由对话
+- 消息持久化通过 RabbitMQ 异步写入 MySQL
 - 对话绑定漫剧，围绕一部作品持续迭代
-- WebSocket 实时消息推送
 
 ### 3. 剧情大纲生成
 - 用户输入题材、可选剧情和漫剧风格，AI 自动生成完整剧情大纲
@@ -288,7 +302,7 @@ draft → section_script_pending → draft (分镜脚本生成完成)
 - `PUT /api/user/profile` - 更新用户信息
 
 ### 聊天服务
-- `POST /api/chat/start` - 开始新对话（需绑定 storyId）
+- `POST /api/chat/start` - 开始新对话（可选绑定 storyId）
 - `POST /api/chat/message` - 发送消息（Agent 路由分发）
 - `GET /api/chat/history/{sessionId}` - 获取历史消息
 - `GET /api/chat/sessions` - 获取用户会话列表
@@ -394,6 +408,11 @@ python main.py                    # 启动 FastAPI + RabbitMQ Worker
    - 确认已执行 `20260522_create_ai_prompts.sql` 和 `20260522_add_ai_prompt_specific_matching.sql`
    - 确认 Python 已安装 `pymysql`：`pip install pymysql`
    - 如果数据库不可用，Python 会自动回退到 `prompt.py` 文件
+
+9. **对话记忆异常**
+   - 确认 Redis 服务已启动且连接正常
+   - 短期记忆存储在 Redis 中，重启 Redis 会丢失未持久化的对话
+   - 长期记忆和关键事实通过 RabbitMQ 异步写入 MySQL，重启不影响
 
 ## 项目进度
 
