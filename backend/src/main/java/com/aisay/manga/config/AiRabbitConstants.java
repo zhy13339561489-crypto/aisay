@@ -12,6 +12,10 @@ public final class AiRabbitConstants {
 
     public static final String STORY_RESULT_ROUTING_KEY = "ai.story.result";
 
+    public static final String CHAT_PERSIST_QUEUE = "aisay.chat.persist";
+
+    public static final String CHAT_PERSIST_ROUTING_KEY = "chat.persist";
+
     public static final String TASK_STORY_GENERATE = "STORY_GENERATE";
 
     public static final String TASK_STORY_REVISE = "STORY_REVISE";

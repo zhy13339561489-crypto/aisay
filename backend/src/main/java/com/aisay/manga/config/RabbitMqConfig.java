@@ -11,6 +11,7 @@ import org.springframework.amqp.support.converter.MessageConverter;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 @Configuration
 @EnableRabbit
@@ -29,6 +30,11 @@ public class RabbitMqConfig {
     @Bean
     public Queue storyResultQueue() {
         return QueueBuilder.durable(AiRabbitConstants.STORY_RESULT_QUEUE).build();
+    }
+
+    @Bean
+    public Queue chatPersistQueue() {
+        return QueueBuilder.durable(AiRabbitConstants.CHAT_PERSIST_QUEUE).build();
     }
 
     @Bean
@@ -52,7 +58,17 @@ public class RabbitMqConfig {
     }
 
     @Bean
-    public MessageConverter rabbitMessageConverter() {
-        return new Jackson2JsonMessageConverter();
+    public Binding chatPersistBinding(
+            @Qualifier("chatPersistQueue") Queue chatPersistQueue,
+            DirectExchange aiExchange
+    ) {
+        return BindingBuilder.bind(chatPersistQueue)
+                .to(aiExchange)
+                .with(AiRabbitConstants.CHAT_PERSIST_ROUTING_KEY);
+    }
+
+    @Bean
+    public MessageConverter rabbitMessageConverter(ObjectMapper objectMapper) {
+        return new Jackson2JsonMessageConverter(objectMapper);
     }
 }

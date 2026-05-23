@@ -1327,24 +1327,33 @@ flowchart LR
 - `router`：为 `/outline-options`、`/prompts`、`/users` 添加路由守卫，避免直接输入 URL 进入无权限页面。
 - `UserManageView`：root 专用页面，用于查看用户列表并设置其他用户为 `ROOT`、`ADMIN` 或 `USER`。
 
-### 对话系统与漫剧解耦
+### 对话系统、Redis 与异步 MySQL 持久化
 
 对话系统现在是通用创作对话，不再绑定某一部具体漫剧。`chat_sessions.story_id` 保留为可空字段，用于兼容历史数据和未来可能的显式工具调用，但新建对话时 Java 后端会写入 `NULL`。
+
+聊天实时数据以 Redis 为主，MySQL 作为异步持久化副本。接口请求不会同步等待 MySQL 写入：创建会话、发送用户消息、保存 AI 回复、更新会话最近活跃时间时，Java 会先写 Redis，再投递 RabbitMQ 持久化消息；`ChatPersistListener` 消费消息后再写入 MySQL。
 
 ```mermaid
 sequenceDiagram
     participant View as ChatView
     participant Java as ChatService
+    participant Redis as Redis
+    participant MQ as RabbitMQ chat.persist
     participant Python as chat_ai
     participant DB as chat_sessions/messages
 
     View->>Java: POST /api/chat/start {title?}
-    Java->>DB: 新建会话 story_id=NULL
+    Java->>Redis: 保存会话 story_id=NULL
+    Java->>MQ: SESSION_UPSERT
+    MQ-->>DB: 异步 upsert chat_sessions
     View->>Java: POST /api/chat/message
-    Java->>DB: 保存用户消息
+    Java->>Redis: 追加用户消息
+    Java->>MQ: MESSAGE_INSERT(user)
     Java->>Python: ChatAgentRequest(storyId=null, story context empty)
     Python-->>Java: ChatAgentResponse(javaMethod=story.none)
-    Java->>DB: 保存 AI 回复
+    Java->>Redis: 追加 AI 回复并更新会话 lastActive
+    Java->>MQ: MESSAGE_INSERT(ai) + SESSION_UPSERT
+    MQ-->>DB: 异步写 messages / chat_sessions
 ```
 
 当前边界如下：
@@ -1352,3 +1361,73 @@ sequenceDiagram
 - 生成剧情大纲仍是独立入口，生成结果会创建/更新漫剧列表中的故事记录，但不要求当前对话绑定该故事。
 - 对话 Agent 不会直接修改某个 Story；即使旧 Prompt 返回 `story.updateOutline`，Java 也会在没有目标 Story 时忽略该工具调用。
 - 如果后续要在对话里修改某部漫剧，应设计“显式选择目标漫剧”或“消息内指定 storyId”的工具调用，而不是恢复会话级强绑定。
+
+Redis Key 设计如下：
+- `aisay:chat:session:{sessionId}`：单个会话 JSON。
+- `aisay:chat:user:{userId}:sessions`：用户会话有序集合，score 为 `lastActive` 毫秒时间戳。
+- `aisay:chat:messages:{sessionId}`：会话消息 Redis List，按发送顺序追加。
+
+异步持久化职责如下：
+- `ChatPersistPublisher`：把会话 upsert 和消息 insert 事件投递到 `aisay.chat.persist` 队列。
+- `ChatPersistListener`：监听 `aisay.chat.persist`，把事件写入 MySQL。
+- `ChatSessionMapper#upsertWithId`：使用 Redis 侧生成的稳定 ID upsert 会话，保证 Redis 与 MySQL 主键一致。
+- `MessageMapper#insertIgnoreWithId`：使用 Redis 侧生成的稳定 ID 写入消息，重复投递时通过 `INSERT IGNORE` 幂等处理。
+
+兼容策略如下：
+- 会话列表和消息历史优先读取 Redis。
+- 如果 Redis 未命中，会从 MySQL 读取旧数据并回填 Redis，方便已有会话平滑迁移。
+- MySQL 回填是尽力兼容逻辑，不是实时主链路；当 MySQL 临时不可用时，Redis 中已有的新对话仍可继续读取和追加消息。
+
+#### 智能对话编排链路
+
+智能对话模块由 Java 负责会话、权限、Redis 记忆和最终业务执行，由 Python 负责大模型推理、指代消解、路由和 ReAct 子链路规划。整体仍保持“Java 调 Python，Python 返回 Java 白名单方法，Java 执行”的安全边界。
+新增 Prompt Key 为 `chat_coreference`、`chat_router`、`chat_memory_summary` 和 `chat_sub_agent_react`；如果已执行 `20260523_create_intelligent_chat_prompts.sql`，它们可在 Prompt 管理页面维护，否则 Python 使用内置 fallback。
+
+```mermaid
+sequenceDiagram
+    participant User as 用户
+    participant Java as ChatServiceImpl
+    participant Redis as Redis Memory
+    participant Python as chat_ai
+    participant Router as 路由 LLM
+    participant Agent as 子链路 AgentExecutor
+    participant Service as Java 模块服务
+
+    User->>Java: 发送消息
+    Java->>Redis: 写入用户消息并读取短期/长期/关键事实记忆
+    Java->>Python: ChatAgentRequest(userRole, recentMessages, longTermMemory, keyFacts)
+    Python->>Router: 指代消解
+    Python->>Router: 意图路由 + 关键信息提取
+    Python->>Router: 必要时摘要旧短期记忆
+    Python->>Agent: 按模块进入 ReAct 子链路
+    Agent-->>Python: javaMethod + javaMethodArgs 或缺失信息问题
+    Python-->>Java: ChatAgentResponse
+    Java->>Redis: 保存长期记忆、关键事实和摘要游标
+    Java->>Service: 按白名单和权限执行模块方法
+    Java->>Redis: 写入 AI 回复
+```
+
+三段记忆如下：
+- 短期记忆：最近 40 条消息，约等于 10-20 轮对话，由 `aisay:chat:messages:{sessionId}` 直接提供。
+- 长期记忆：短期窗口之外的旧消息会传给 Python，通过 LLM 压缩摘要后写入 `aisay:chat:memory:long:{sessionId}`。
+- 关键真实信息：故事名、故事 ID、Prompt Key、目标用户 ID、题材和风格等稳定事实写入 `aisay:chat:memory:facts:{sessionId}`，用于后续补全指代和缺失参数。该 Key 使用 Redis Hash 结构化存储，每个事实是一个独立 field，field value 使用 JSON 序列化，Java/Python 之间以 `Map<String,Object>` / `dict` 传递。
+
+子链路职责如下：
+- `manga`：封装漫剧列表、详情、生成剧情大纲、更新基础信息、更新详情、修改大纲、生成分卷、小节、资产、脚本和删除等 Tool。
+- `outline_config`：封装题材和漫剧风格配置的列表、新增、修改、删除 Tool，需要 `ADMIN/ROOT`。
+- `prompt_management`：封装 Prompt 列表、详情、新增、修改、删除 Tool，需要 `ADMIN/ROOT`。
+- `user_permission`：封装用户列表和权限修改 Tool，需要 `ROOT`。
+- `general`：普通创作问答，不返回业务 Java 方法。
+
+权限防线分两层：Python 路由和子链路会根据 `userRole` 提前拒绝无权限操作；Java 执行业务方法前仍调用 `PermissionService` 或对应 Service 的权限检查，防止模型误路由或用户构造参数绕过限制。
+
+### 剧情大纲结构化输出容错
+
+剧情大纲生成仍然通过 `story_ai_pkg.outline.generate_story_outline` 调用通义模型，并使用 `with_structured_output(NovelOutlineOutput)` 约束输出字段。由于上游模型或特定 Prompt 偶发会返回输入参数镜像，而不是目标结构，Python 侧在进入 RabbitMQ 结果发布前增加了一层输出容错。
+
+处理顺序如下：
+- 第一次调用使用当前题材、漫剧风格和剧情输入，按 `NovelOutlineOutput` 解析。
+- 如果 Pydantic 校验失败，Python 会从异常中提取模型返回的错误对象，并在同一 Prompt 变量中追加更强的结构化输出要求后重试一次。
+- 如果重试后仍然缺失 `novel_name`、`story_summary`、`outline` 或 `main_characters`，Python 会生成一个带有“临时降级大纲”标记的合法结果，保证 Java 后端能够正常落库和刷新前端列表。
+
+这层容错只处理剧情大纲生成的输出结构异常，不吞掉网络中断、数据库不可用、Prompt 变量缺失等其他真实故障。临时降级大纲是最后兜底方案，目的是避免异步任务因为偶发结构化输出问题完全失败；如果频繁出现，应优先检查 Prompt 管理中特定题材/风格的 Prompt 是否要求输出了错误字段。

@@ -1780,3 +1780,69 @@
 ### 需要你做的事情
 - [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260523_update_chat_agent_unbound_prompt.sql`，让数据库中的默认 `chat_agent` Prompt 同步为不绑定漫剧版本。
 - [ ] 重启 Java 后端、Python FastAPI 和前端开发服务。
+
+## 2026-05-23 对话 Redis 存储与 RabbitMQ 异步落库
+### 后端
+- [x] 新增聊天持久化队列：`aisay.chat.persist`，路由键 `chat.persist`。
+- [x] 新增 `ChatRedisRepository`，会话列表、会话详情和消息历史优先读写 Redis。
+- [x] Redis Key 设计：`aisay:chat:session:{sessionId}`、`aisay:chat:user:{userId}:sessions`、`aisay:chat:messages:{sessionId}`。
+- [x] 新建对话、发送用户消息、保存 AI 回复、更新会话最近活跃时间都先写 Redis。
+- [x] 新增 `ChatPersistPublisher`，写 Redis 后投递 RabbitMQ 持久化消息。
+- [x] 新增 `ChatPersistListener`，异步消费队列并写入 MySQL。
+- [x] 会话使用 `upsertWithId` 写入 MySQL，消息使用 `insertIgnoreWithId` 写入 MySQL，支持重复消息幂等处理。
+- [x] Redis 未命中时会从 MySQL 读取旧会话/历史消息并回填 Redis，兼容历史数据。
+- [x] MySQL 回填属于尽力兼容逻辑；如果 MySQL 临时不可用，不会阻断 Redis 中已有对话的列表、详情和新消息读取。
+- [x] RabbitMQ JSON converter 改为使用 Spring Boot 统一 `ObjectMapper`，支持 `LocalDateTime` 消息字段序列化。
+
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml -q compile`。
+
+### 需要你做的事情
+- [ ] 重启 Java 后端，让 Redis 读写和 RabbitMQ 异步落库监听器生效。
+- [ ] 确认 Redis 和 RabbitMQ 正常运行；聊天接口现在依赖 Redis 作为实时存储。
+- [ ] 发送一条对话后，可先刷新页面确认 Redis 中能立即读到历史，再稍后检查 MySQL `messages` / `chat_sessions` 是否异步写入。
+
+## 2026-05-23 智能对话模块
+### Python
+- [x] 新增 `python-ai/chat_agent_pkg` 软件包，拆分智能对话链路：`routing` 负责指代消解和大模型路由，`memory` 负责长期记忆和关键事实更新，`sub_agents` 负责 ReAct 子链路，`tools` 封装模块 Tool。
+- [x] `chat_ai.py` 改为编排流程：用户输入 -> 指代消解 -> 意图路由/关键信息提取 -> 记忆更新 -> 子链路 ReAct AgentExecutor -> 返回 Java 方法和参数。
+- [x] 子链路覆盖 `manga`、`outline_config`、`prompt_management`、`user_permission` 和 `general`，缺少必要字段时会返回询问信息，不会执行 Java 操作。
+- [x] 权限预判已加入 Python：大纲配置和 Prompt 管理需要 `ADMIN/ROOT`，用户权限管理需要 `ROOT`，普通用户会收到权限不足提示。
+- [x] `requirements.txt` 增加 `langchain>=0.2.0`，用于显式提供 `AgentExecutor` 和 `create_react_agent`。
+
+### Java 后端
+- [x] `ChatAgentRequest` 增加用户角色、短期消息、长期记忆、关键真实信息和待摘要消息；`ChatAgentResponse` 增加模块、意图、关键信息、缺失信息、记忆更新结果。
+- [x] 新增 `ChatMemoryMessage` DTO，用于 Java 与 Python 之间传递短期记忆片段。
+- [x] `ChatRedisRepository` 新增长期记忆、关键事实和摘要游标 Redis Key：`aisay:chat:memory:long:{sessionId}`、`aisay:chat:memory:facts:{sessionId}`、`aisay:chat:memory:summary-cursor:{sessionId}`。
+- [x] 关键真实信息已改为结构化存储：Java/Python 均使用 `Map/dict`，Redis 使用 Hash 按字段保存，字段值用 JSON 序列化，兼容旧版 String JSON 并自动迁移。
+- [x] `ChatServiceImpl` 调用 Python 前会读取最近 40 条消息作为短期记忆，并把超过短期窗口的旧消息交给 Python 摘要为长期记忆。
+- [x] Java 增加白名单分发，支持漫剧、配置、Prompt、用户权限模块的主要服务方法；大纲配置、Prompt 和用户权限仍会在 Java 服务层做二次权限校验。
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260523_create_intelligent_chat_prompts.sql`，用于把智能对话新增 Prompt Key 纳入 Prompt 管理；未执行时 Python 会使用内置 fallback。
+
+### 验证结果
+- [x] Python 导入检查成功：`import chat_ai` 和 `chat_agent_pkg` 工具加载正常。
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml -q compile`。
+- [x] `git diff --check` 无格式错误，仅有既有 LF/CRLF 提示。
+
+### 需要你做的事情
+- [ ] 在 `python-ai` 虚拟环境中执行 `.\venv\Scripts\pip.exe install -r requirements.txt`，确保 `langchain` 依赖显式安装。
+- [ ] 可选执行 SQL 文件：`backend/src/main/resources/db/20260523_create_intelligent_chat_prompts.sql`，这样可在 Prompt 管理页面维护 `chat_coreference`、`chat_router`、`chat_memory_summary`、`chat_sub_agent_react`。
+- [ ] 重启 Python FastAPI 服务，让新的智能对话链路生效。
+- [ ] 重启 Java 后端，让新的 Chat DTO、Redis 记忆字段和 Java 白名单分发生效。
+
+## 2026-05-23 剧情大纲结构化输出健壮性
+### 问题现象
+- [x] RabbitMQ worker 执行 `generate_story_outline` 时，通义结构化输出偶发返回了类似输入参数的对象，例如 `genre`、`visual_style`、`partial_plot`，没有返回 `novel_name`、`story_summary`、`outline`、`main_characters`。
+- [x] 由于 `NovelOutlineOutput` 这些字段是必填字段，Pydantic 校验失败后任务直接发布 `success=false`。
+### 调整内容
+- [x] `python-ai/story_ai_pkg/outline.py` 增加剧情大纲 payload 构造函数，统一处理题材、风格和可选剧情。
+- [x] 增加结构化输出规整函数，兼容 Pydantic 对象、dict 结果，以及 `novelName/storySummary/mainCharacters` 这类 camelCase 字段。
+- [x] 增加 Pydantic 校验异常解析，从异常中提取模型返回的错误入参，便于日志和兜底内容使用。
+- [x] `generate_story_outline` 现在采用三段保护：首次结构化生成失败后追加严格输出要求重试一次；如果仍失败，则生成一个字段完整、可落库的临时降级大纲，避免 RabbitMQ 任务因为缺字段直接失败。
+### 验证结果
+- [x] Python 导入和兜底构造检查成功：`.\venv\Scripts\python.exe -B -c "import story_ai; ..."`。
+- [x] 手动模拟 `{'genre':'修仙','visual_style':'国漫','partial_plot':None}` 缺字段结果时，能够提取异常中的原始输入并构造合法兜底大纲。
+### 需要你做的事情
+- [ ] 重启 Python FastAPI / RabbitMQ worker，让剧情大纲结构化输出保护逻辑生效。
+- [ ] 之前已经发布失败结果的旧任务不会自动恢复；请在前端重新发起一次“生成剧情大纲”任务。
+- [ ] 如果前端看到“临时降级大纲”，说明模型连续两次没有返回正确结构，可稍后重新生成，或检查 Prompt 管理中对应题材/风格的特定 Prompt 是否误导模型输出了输入参数。

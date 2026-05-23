@@ -4,6 +4,9 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.util.List;
+import java.util.Map;
+
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
@@ -26,4 +29,16 @@ public class ChatAgentRequest {
     private String outline;
 
     private String userMessage;
+
+    private String userRole;
+
+    private List<ChatMemoryMessage> recentMessages;
+
+    private String longTermMemory;
+
+    private Map<String, Object> keyFacts;
+
+    private List<ChatMemoryMessage> summaryCandidateMessages;
+
+    private Integer summaryCandidateCount;
 }

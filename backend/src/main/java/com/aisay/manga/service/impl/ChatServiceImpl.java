@@ -2,22 +2,43 @@ package com.aisay.manga.service.impl;
 
 import com.aisay.manga.dto.ai.ChatAgentRequest;
 import com.aisay.manga.dto.ai.ChatAgentResponse;
+import com.aisay.manga.dto.ai.ChatMemoryMessage;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
+import com.aisay.manga.dto.request.AiPromptRequest;
 import com.aisay.manga.dto.request.ChatStartRequest;
 import com.aisay.manga.dto.request.SendMessageRequest;
+import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
+import com.aisay.manga.dto.request.StoryGenerateRequest;
+import com.aisay.manga.dto.request.StoryOutlineOptionRequest;
+import com.aisay.manga.dto.request.StoryOutlineReviseRequest;
+import com.aisay.manga.dto.request.StoryUpdateRequest;
+import com.aisay.manga.dto.request.StoryVolumeOutlineReviseRequest;
+import com.aisay.manga.dto.request.UserRoleUpdateRequest;
+import com.aisay.manga.dto.response.AiPromptResponse;
 import com.aisay.manga.dto.response.ChatSessionResponse;
 import com.aisay.manga.dto.response.MessageResponse;
+import com.aisay.manga.dto.response.StoryDetailResponse;
+import com.aisay.manga.dto.response.StoryOutlineOptionResponse;
+import com.aisay.manga.dto.response.StoryResponse;
+import com.aisay.manga.dto.response.UserManageResponse;
 import com.aisay.manga.entity.Character;
 import com.aisay.manga.entity.ChatSession;
 import com.aisay.manga.entity.Message;
 import com.aisay.manga.entity.Story;
 import com.aisay.manga.repository.CharacterMapper;
-import com.aisay.manga.repository.ChatSessionMapper;
-import com.aisay.manga.repository.MessageMapper;
+import com.aisay.manga.repository.ChatRedisRepository;
 import com.aisay.manga.repository.StoryMapper;
+import com.aisay.manga.service.AiPromptService;
 import com.aisay.manga.service.ChatService;
+import com.aisay.manga.service.PermissionService;
+import com.aisay.manga.service.StoryOutlineOptionService;
+import com.aisay.manga.service.StoryService;
+import com.aisay.manga.service.UserService;
 import com.aisay.manga.utils.AiEngineClient;
+import com.aisay.manga.utils.ChatIdGenerator;
+import com.aisay.manga.utils.ChatPersistPublisher;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.lang3.StringUtils;
@@ -25,6 +46,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -48,9 +70,13 @@ public class ChatServiceImpl implements ChatService {
 
     private static final String METHOD_UPDATE_OUTLINE = "story.updateOutline";
 
-    private final ChatSessionMapper chatSessionMapper;
+    private static final int SHORT_TERM_MEMORY_MESSAGE_LIMIT = 40;
 
-    private final MessageMapper messageMapper;
+    private static final int DEFAULT_PAGE = 1;
+
+    private static final int DEFAULT_PAGE_SIZE = 10;
+
+    private final ChatRedisRepository chatRedisRepository;
 
     private final StoryMapper storyMapper;
 
@@ -60,24 +86,50 @@ public class ChatServiceImpl implements ChatService {
 
     private final ObjectMapper objectMapper;
 
+    private final ChatIdGenerator chatIdGenerator;
+
+    private final ChatPersistPublisher chatPersistPublisher;
+
+    private final StoryService storyService;
+
+    private final StoryOutlineOptionService storyOutlineOptionService;
+
+    private final AiPromptService aiPromptService;
+
+    private final UserService userService;
+
+    private final PermissionService permissionService;
+
     /**
      * 作用：注入聊天、消息、故事、角色数据访问对象，以及 Python AI 引擎客户端。
      * 调用方：Spring 容器启动时自动构造 ChatServiceImpl。
      */
     public ChatServiceImpl(
-            ChatSessionMapper chatSessionMapper,
-            MessageMapper messageMapper,
+            ChatRedisRepository chatRedisRepository,
             StoryMapper storyMapper,
             CharacterMapper characterMapper,
             AiEngineClient aiEngineClient,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper,
+            ChatIdGenerator chatIdGenerator,
+            ChatPersistPublisher chatPersistPublisher,
+            StoryService storyService,
+            StoryOutlineOptionService storyOutlineOptionService,
+            AiPromptService aiPromptService,
+            UserService userService,
+            PermissionService permissionService
     ) {
-        this.chatSessionMapper = chatSessionMapper;
-        this.messageMapper = messageMapper;
+        this.chatRedisRepository = chatRedisRepository;
         this.storyMapper = storyMapper;
         this.characterMapper = characterMapper;
         this.aiEngineClient = aiEngineClient;
         this.objectMapper = objectMapper;
+        this.chatIdGenerator = chatIdGenerator;
+        this.chatPersistPublisher = chatPersistPublisher;
+        this.storyService = storyService;
+        this.storyOutlineOptionService = storyOutlineOptionService;
+        this.aiPromptService = aiPromptService;
+        this.userService = userService;
+        this.permissionService = permissionService;
     }
 
     /**
@@ -90,6 +142,7 @@ public class ChatServiceImpl implements ChatService {
         LocalDateTime now = LocalDateTime.now();
 
         ChatSession session = new ChatSession();
+        session.setId(chatIdGenerator.nextId());
         session.setUserId(userId);
         session.setStoryId(null);
         session.setSessionKey(UUID.randomUUID().toString());
@@ -101,7 +154,8 @@ public class ChatServiceImpl implements ChatService {
         session.setStartedAt(now);
         session.setLastActive(now);
 
-        chatSessionMapper.insert(session);
+        chatRedisRepository.saveSession(session);
+        chatPersistPublisher.publishSessionUpsert(session);
         return toSessionResponse(session);
     }
 
@@ -112,7 +166,7 @@ public class ChatServiceImpl implements ChatService {
     @Override
     public List<MessageResponse> getHistory(Long sessionId, Long userId) {
         getOwnedActiveSession(sessionId, userId);
-        return messageMapper.selectBySessionIdOrderByCreatedAtAsc(sessionId)
+        return chatRedisRepository.getMessages(sessionId)
                 .stream()
                 .map(this::toMessageResponse)
                 .toList();
@@ -128,7 +182,8 @@ public class ChatServiceImpl implements ChatService {
         ChatSession session = getOwnedActiveSession(sessionId, userId);
         session.setStatus(SESSION_STATUS_DELETED);
         session.setLastActive(LocalDateTime.now());
-        chatSessionMapper.updateById(session);
+        chatRedisRepository.saveSession(session);
+        chatPersistPublisher.publishSessionUpsert(session);
     }
 
     /**
@@ -137,11 +192,7 @@ public class ChatServiceImpl implements ChatService {
      */
     @Override
     public List<ChatSessionResponse> getUserSessions(Long userId) {
-        return chatSessionMapper.selectList(new LambdaQueryWrapper<ChatSession>()
-                        .eq(ChatSession::getUserId, userId)
-                        .ne(ChatSession::getStatus, SESSION_STATUS_DELETED)
-                        .orderByDesc(ChatSession::getLastActive)
-                        .orderByDesc(ChatSession::getId))
+        return chatRedisRepository.getUserSessions(userId)
                 .stream()
                 .map(this::toSessionResponse)
                 .toList();
@@ -158,19 +209,23 @@ public class ChatServiceImpl implements ChatService {
         LocalDateTime now = LocalDateTime.now();
 
         Message userMessage = new Message();
+        userMessage.setId(chatIdGenerator.nextId());
         userMessage.setSessionId(session.getId());
         userMessage.setRole(ROLE_USER);
         userMessage.setContent(request.getContent());
         userMessage.setMetadata(new HashMap<>());
         userMessage.setCreatedAt(now);
-        messageMapper.insert(userMessage);
+        chatRedisRepository.appendMessage(userMessage);
+        chatPersistPublisher.publishMessageInsert(userMessage);
 
         String assistantContent = runAgentAndDispatch(userId, session, request.getContent());
         Message aiMessage = createAiMessage(session.getId(), assistantContent);
-        messageMapper.insert(aiMessage);
+        chatRedisRepository.appendMessage(aiMessage);
+        chatPersistPublisher.publishMessageInsert(aiMessage);
 
         session.setLastActive(LocalDateTime.now());
-        chatSessionMapper.updateById(session);
+        chatRedisRepository.saveSession(session);
+        chatPersistPublisher.publishSessionUpsert(session);
 
         return toMessageResponse(aiMessage);
     }
@@ -181,19 +236,13 @@ public class ChatServiceImpl implements ChatService {
      */
     private String runAgentAndDispatch(Long userId, ChatSession session, String userMessage) {
         try {
-            ChatAgentResponse response = aiEngineClient.runChatAgent(new ChatAgentRequest(
-                    userId,
-                    session.getId(),
-                    null,
-                    session.getTitle(),
-                    null,
-                    null,
-                    null,
-                    null,
-                    userMessage
-            ));
-            dispatchJavaMethod(null, response);
+            ChatAgentResponse response = aiEngineClient.runChatAgent(buildChatAgentRequest(userId, session, userMessage));
+            persistChatMemory(session.getId(), response);
+            String executionResult = dispatchJavaMethod(userId, response);
+            return combineAssistantMessage(response, executionResult);
+            /*
             return resolveText(response.getAssistantMessage(), "已处理你的请求。");
+            */
         } catch (RuntimeException ex) {
             return "Python 对话 Agent 暂时不可用，请确认 FastAPI 服务运行后再试。";
         }
@@ -203,7 +252,8 @@ public class ChatServiceImpl implements ChatService {
      * 作用：根据 Python 返回的 javaMethod 做白名单分发，避免 Python 任意指定后端方法。
      * 调用方：runAgentAndDispatch。
      */
-    private void dispatchJavaMethod(Story story, ChatAgentResponse response) {
+    private String dispatchJavaMethod(Long userId, ChatAgentResponse response) {
+        /*
         String method = resolveText(response.getJavaMethod(), METHOD_NONE);
         if (METHOD_NONE.equals(method)) {
             return;
@@ -215,13 +265,316 @@ public class ChatServiceImpl implements ChatService {
             updateStoryOutline(story, response.getJavaMethodArgs());
             return;
         }
-        throw new IllegalArgumentException("Unsupported Java method from Python agent: " + method);
+        */
+        String method = resolveText(response.getJavaMethod(), METHOD_NONE);
+        if (METHOD_NONE.equals(method)) {
+            return null;
+        }
+        Map<String, Object> args = response.getJavaMethodArgs() == null ? Map.of() : response.getJavaMethodArgs();
+        try {
+            return switch (method) {
+                case METHOD_UPDATE_OUTLINE -> dispatchLegacyStoryUpdateOutline(userId, args);
+                case "story.list" -> dispatchStoryList(userId, args);
+                case "story.detail" -> formatStoryDetail(storyService.getStoryDetail(requireLongArg(args, "storyId"), userId));
+                case "story.generate" -> formatStory(storyService.generateStory(userId, toStoryGenerateRequest(args)));
+                case "story.updateBasic" -> formatStory(storyService.updateStory(requireLongArg(args, "storyId"), userId, toStoryUpdateRequest(args)));
+                case "story.updateDetail" -> formatStoryDetail(storyService.updateStoryDetail(requireLongArg(args, "storyId"), userId, toStoryDetailUpdateRequest(args)));
+                case "story.reviseOutline" -> formatStoryDetail(storyService.reviseStoryOutline(requireLongArg(args, "storyId"), userId, new StoryOutlineReviseRequest(requireStringArg(args, "suggestion"))));
+                case "story.generateVolumeOutline" -> formatStoryDetail(storyService.generateVolumeOutline(requireLongArg(args, "storyId"), userId));
+                case "story.reviseVolumeOutline" -> formatStoryDetail(storyService.reviseVolumeOutline(requireLongArg(args, "storyId"), userId, new StoryVolumeOutlineReviseRequest(requireStringArg(args, "suggestion"))));
+                case "story.generateVolumeSections" -> formatStoryDetail(storyService.generateVolumeSections(requireLongArg(args, "storyId"), requireLongArg(args, "volumeId"), userId));
+                case "story.generateSectionAssets" -> formatStoryDetail(storyService.generateSectionAssets(requireLongArg(args, "storyId"), requireLongArg(args, "sectionId"), userId));
+                case "story.generateSectionScript" -> formatStoryDetail(storyService.generateSectionScript(requireLongArg(args, "storyId"), requireLongArg(args, "sectionId"), userId));
+                case "story.delete" -> dispatchStoryDelete(userId, args);
+                case "outlineConfig.list" -> formatOutlineOptions(dispatchOutlineOptionList(userId, args));
+                case "outlineConfig.create" -> formatOutlineOption(dispatchOutlineOptionCreate(userId, args));
+                case "outlineConfig.update" -> formatOutlineOption(dispatchOutlineOptionUpdate(userId, args));
+                case "outlineConfig.delete" -> dispatchOutlineOptionDelete(userId, args);
+                case "prompt.list" -> formatPrompts(dispatchPromptList(userId, args));
+                case "prompt.detail" -> formatPrompt(dispatchPromptDetail(userId, args));
+                case "prompt.create" -> formatPrompt(dispatchPromptCreate(userId, args));
+                case "prompt.update" -> formatPrompt(dispatchPromptUpdate(userId, args));
+                case "prompt.delete" -> dispatchPromptDelete(userId, args);
+                case "user.list" -> formatUsers(userService.listUsers(userId));
+                case "user.updateRole" -> formatUser(userService.updateUserRole(userId, requireLongArg(args, "targetUserId"), new UserRoleUpdateRequest(requireStringArg(args, "role"))));
+                default -> "当前 Java 白名单还不支持该操作：" + method;
+            };
+        } catch (RuntimeException ex) {
+            return "操作没有执行成功：" + ex.getMessage();
+        }
     }
 
     /**
      * 作用：执行 story.updateOutline，把 Python 返回的故事摘要、大纲和角色设定同步写入数据库。
      * 调用方：dispatchJavaMethod。
      */
+    private ChatAgentRequest buildChatAgentRequest(Long userId, ChatSession session, String userMessage) {
+        List<Message> allMessages = chatRedisRepository.getMessages(session.getId());
+        int summaryCursor = Math.min(chatRedisRepository.getSummaryCursor(session.getId()), allMessages.size());
+        int summaryEnd = Math.max(summaryCursor, allMessages.size() - SHORT_TERM_MEMORY_MESSAGE_LIMIT);
+        List<Message> summaryCandidateMessages = summaryEnd > summaryCursor
+                ? new ArrayList<>(allMessages.subList(summaryCursor, summaryEnd))
+                : List.of();
+        List<Message> recentMessages = tailMessages(allMessages, SHORT_TERM_MEMORY_MESSAGE_LIMIT);
+
+        ChatAgentRequest request = new ChatAgentRequest();
+        request.setUserId(userId);
+        request.setSessionId(session.getId());
+        request.setStoryId(session.getStoryId());
+        request.setTitle(session.getTitle());
+        request.setUserMessage(userMessage);
+        request.setUserRole(userService.getProfile(userId).getRole());
+        request.setRecentMessages(toMemoryMessages(recentMessages));
+        request.setLongTermMemory(chatRedisRepository.getLongTermMemory(session.getId()));
+        request.setKeyFacts(chatRedisRepository.getKeyFacts(session.getId()));
+        request.setSummaryCandidateMessages(toMemoryMessages(summaryCandidateMessages));
+        request.setSummaryCandidateCount(summaryEnd);
+        return request;
+    }
+
+    private void persistChatMemory(Long sessionId, ChatAgentResponse response) {
+        if (StringUtils.isNotBlank(response.getLongTermMemory())) {
+            chatRedisRepository.saveLongTermMemory(sessionId, response.getLongTermMemory());
+        }
+        if (response.getKeyFacts() != null && !response.getKeyFacts().isEmpty()) {
+            chatRedisRepository.saveKeyFacts(sessionId, response.getKeyFacts());
+        }
+        if (response.getSummarizedMessageCount() != null) {
+            chatRedisRepository.saveSummaryCursor(sessionId, response.getSummarizedMessageCount());
+        }
+    }
+
+    private List<Message> tailMessages(List<Message> messages, int limit) {
+        if (messages.size() <= limit) {
+            return messages;
+        }
+        return new ArrayList<>(messages.subList(messages.size() - limit, messages.size()));
+    }
+
+    private List<ChatMemoryMessage> toMemoryMessages(List<Message> messages) {
+        return messages.stream()
+                .map(message -> new ChatMemoryMessage(
+                        message.getRole(),
+                        message.getContent(),
+                        message.getCreatedAt() == null ? null : message.getCreatedAt().toString()
+                ))
+                .toList();
+    }
+
+    private String combineAssistantMessage(ChatAgentResponse response, String executionResult) {
+        String assistantMessage = resolveText(response.getAssistantMessage(), "已理解你的请求。");
+        if (StringUtils.isBlank(executionResult)) {
+            return assistantMessage;
+        }
+        return assistantMessage + "\n\n执行结果：\n" + executionResult;
+    }
+
+    private String dispatchLegacyStoryUpdateOutline(Long userId, Map<String, Object> args) {
+        Story story = getOwnedStory(requireLongArg(args, "storyId"), userId);
+        updateStoryOutline(story, args);
+        return "已更新漫剧大纲：" + story.getTitle();
+    }
+
+    private String dispatchStoryList(Long userId, Map<String, Object> args) {
+        int page = argInteger(args, "page", DEFAULT_PAGE);
+        int size = argInteger(args, "size", DEFAULT_PAGE_SIZE);
+        return formatStoryPage(storyService.getUserStories(userId, page, size));
+    }
+
+    private String dispatchStoryDelete(Long userId, Map<String, Object> args) {
+        Long storyId = requireLongArg(args, "storyId");
+        storyService.deleteStory(storyId, userId);
+        return "已删除漫剧，ID：" + storyId;
+    }
+
+    private List<StoryOutlineOptionResponse> dispatchOutlineOptionList(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        return storyOutlineOptionService.listOptions(argString(args, "type"), argBoolean(args, "enabled"));
+    }
+
+    private StoryOutlineOptionResponse dispatchOutlineOptionCreate(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        return storyOutlineOptionService.createOption(toStoryOutlineOptionRequest(args));
+    }
+
+    private StoryOutlineOptionResponse dispatchOutlineOptionUpdate(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        return storyOutlineOptionService.updateOption(requireLongArg(args, "id"), toStoryOutlineOptionRequest(args));
+    }
+
+    private String dispatchOutlineOptionDelete(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        Long id = requireLongArg(args, "id");
+        storyOutlineOptionService.deleteOption(id);
+        return "已删除大纲配置，ID：" + id;
+    }
+
+    private List<AiPromptResponse> dispatchPromptList(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        return aiPromptService.listPrompts(argString(args, "category"), argBoolean(args, "enabled"), argString(args, "keyword"));
+    }
+
+    private AiPromptResponse dispatchPromptDetail(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        return aiPromptService.getPrompt(requireLongArg(args, "id"));
+    }
+
+    private AiPromptResponse dispatchPromptCreate(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        return aiPromptService.createPrompt(objectMapper.convertValue(args, AiPromptRequest.class));
+    }
+
+    private AiPromptResponse dispatchPromptUpdate(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        return aiPromptService.updatePrompt(requireLongArg(args, "id"), objectMapper.convertValue(args, AiPromptRequest.class));
+    }
+
+    private String dispatchPromptDelete(Long userId, Map<String, Object> args) {
+        permissionService.requireAdminOrRoot(userId);
+        Long id = requireLongArg(args, "id");
+        aiPromptService.deletePrompt(id);
+        return "已删除 Prompt，ID：" + id;
+    }
+
+    private StoryGenerateRequest toStoryGenerateRequest(Map<String, Object> args) {
+        return new StoryGenerateRequest(requireStringArg(args, "genre"), requireStringArg(args, "style"), argString(args, "plot"));
+    }
+
+    private StoryUpdateRequest toStoryUpdateRequest(Map<String, Object> args) {
+        return new StoryUpdateRequest(argString(args, "title"), argString(args, "genre"), argString(args, "style"), argString(args, "synopsis"));
+    }
+
+    private StoryDetailUpdateRequest toStoryDetailUpdateRequest(Map<String, Object> args) {
+        return objectMapper.convertValue(args, StoryDetailUpdateRequest.class);
+    }
+
+    private StoryOutlineOptionRequest toStoryOutlineOptionRequest(Map<String, Object> args) {
+        return new StoryOutlineOptionRequest(
+                requireStringArg(args, "type"),
+                requireStringArg(args, "name"),
+                argString(args, "description"),
+                argInteger(args, "sortOrder", 0),
+                argBoolean(args, "enabled")
+        );
+    }
+
+    private String formatStoryPage(Page<StoryResponse> page) {
+        if (page.getRecords().isEmpty()) {
+            return "当前没有查询到漫剧。";
+        }
+        List<String> rows = page.getRecords().stream()
+                .map(story -> story.getId() + " - " + story.getTitle() + "（" + story.getStatus() + "）")
+                .toList();
+        return "共 " + page.getTotal() + " 部漫剧：\n" + String.join("\n", rows);
+    }
+
+    private String formatStory(StoryResponse story) {
+        return "漫剧：" + story.getId() + " - " + story.getTitle() + "，状态：" + story.getStatus();
+    }
+
+    private String formatStoryDetail(StoryDetailResponse story) {
+        int volumeCount = story.getVolumeOutlines() == null ? 0 : story.getVolumeOutlines().size();
+        int characterCount = story.getCharacters() == null ? 0 : story.getCharacters().size();
+        return "漫剧详情：" + story.getId() + " - " + story.getTitle()
+                + "，状态：" + story.getStatus()
+                + "，角色数：" + characterCount
+                + "，分卷数：" + volumeCount;
+    }
+
+    private String formatOutlineOptions(List<StoryOutlineOptionResponse> options) {
+        if (options.isEmpty()) {
+            return "没有查询到大纲配置。";
+        }
+        return String.join("\n", options.stream()
+                .map(option -> option.getId() + " - " + option.getType() + " - " + option.getName() + "（enabled=" + option.getEnabled() + "）")
+                .toList());
+    }
+
+    private String formatOutlineOption(StoryOutlineOptionResponse option) {
+        return "大纲配置：" + option.getId() + " - " + option.getType() + " - " + option.getName() + "（enabled=" + option.getEnabled() + "）";
+    }
+
+    private String formatPrompts(List<AiPromptResponse> prompts) {
+        if (prompts.isEmpty()) {
+            return "没有查询到 Prompt。";
+        }
+        return String.join("\n", prompts.stream()
+                .map(prompt -> prompt.getId() + " - " + prompt.getPromptKey() + " - " + prompt.getPromptName() + "（" + prompt.getPromptScope() + "）")
+                .toList());
+    }
+
+    private String formatPrompt(AiPromptResponse prompt) {
+        return "Prompt：" + prompt.getId() + " - " + prompt.getPromptKey() + " - " + prompt.getPromptName()
+                + "（" + prompt.getPromptScope() + "，enabled=" + prompt.getEnabled() + "）";
+    }
+
+    private String formatUsers(List<UserManageResponse> users) {
+        if (users.isEmpty()) {
+            return "没有查询到用户。";
+        }
+        return String.join("\n", users.stream()
+                .map(user -> user.getId() + " - " + user.getUsername() + " - " + user.getRole())
+                .toList());
+    }
+
+    private String formatUser(UserManageResponse user) {
+        return "用户：" + user.getId() + " - " + user.getUsername() + "，权限：" + user.getRole();
+    }
+
+    private Long requireLongArg(Map<String, Object> args, String key) {
+        Long value = argLong(args, key);
+        if (value == null) {
+            throw new IllegalArgumentException("缺少参数：" + key);
+        }
+        return value;
+    }
+
+    private String requireStringArg(Map<String, Object> args, String key) {
+        String value = argString(args, key);
+        if (StringUtils.isBlank(value)) {
+            throw new IllegalArgumentException("缺少参数：" + key);
+        }
+        return value;
+    }
+
+    private Long argLong(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value instanceof Number number) {
+            return number.longValue();
+        }
+        if (value instanceof String text && StringUtils.isNotBlank(text)) {
+            return Long.valueOf(text.trim());
+        }
+        return null;
+    }
+
+    private Integer argInteger(Map<String, Object> args, String key, Integer fallback) {
+        Object value = args.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        if (value instanceof String text && StringUtils.isNotBlank(text)) {
+            return Integer.valueOf(text.trim());
+        }
+        return fallback;
+    }
+
+    private Boolean argBoolean(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof String text && StringUtils.isNotBlank(text)) {
+            return Boolean.valueOf(text.trim());
+        }
+        return null;
+    }
+
+    private String argString(Map<String, Object> args, String key) {
+        Object value = args.get(key);
+        return value == null ? null : String.valueOf(value);
+    }
+
     private void updateStoryOutline(Story story, Map<String, Object> args) {
         if (args == null) {
             return;
@@ -265,6 +618,7 @@ public class ChatServiceImpl implements ChatService {
      */
     private Message createAiMessage(Long sessionId, String content) {
         Message aiMessage = new Message();
+        aiMessage.setId(chatIdGenerator.nextId());
         aiMessage.setSessionId(sessionId);
         aiMessage.setRole(ROLE_AI);
         aiMessage.setContent(content);
@@ -295,7 +649,7 @@ public class ChatServiceImpl implements ChatService {
      * 调用方：getHistory、deleteSession、sendMessage。
      */
     private ChatSession getOwnedActiveSession(Long sessionId, Long userId) {
-        ChatSession session = chatSessionMapper.selectById(sessionId);
+        ChatSession session = chatRedisRepository.getSession(sessionId);
         if (session == null || SESSION_STATUS_DELETED.equals(session.getStatus())) {
             throw new NoSuchElementException("Session not found");
         }
