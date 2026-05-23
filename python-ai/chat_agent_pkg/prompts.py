@@ -1,3 +1,16 @@
+# 智能对话 Agent 提示词模板模块
+# 本文件集中存放对话系统各阶段的提示词模板：
+# 1. 指代消解提示词：将用户输入中的指代词替换为具体实体
+# 2. 路由提示词：判断用户意图并路由到对应模块
+# 3. 记忆压缩提示词：将旧短期记忆压缩为长期记忆
+# 4. 子 Agent 提示词：ReAct 模式的工具选择和执行
+
+
+# ── 1. 指代消解提示词 ──────────────────────────────────────────────────
+# 用途：将用户输入中的"它"、"这个"、"刚才那个"等指代词替换为具体实体
+# 调用方：routing.resolve_coreference
+# 输入变量：{RecentMessages} 近期消息、{LongTermMemory} 长期记忆、{KeyFacts} 关键事实、{UserMessage} 用户消息
+# 输出：CoreferenceOutput 结构，包含 resolvedMessage 和 resolutionNotes
 prompt_ChatCoreference = """
 你是对话系统中的指代消解器。你的任务是把用户当前输入改写成一条独立、明确、可执行的中文指令。
 
@@ -14,13 +27,18 @@ prompt_ChatCoreference = """
 {UserMessage}
 
 要求：
-1. 只消解“它、这个、刚才那个、这部漫剧、那个 Prompt、这个用户”等指代，不要擅自新增事实。
+1. 只消解"它、这个、刚才那个、这部漫剧、那个 Prompt、这个用户"等指代，不要擅自新增事实。
 2. 如果用户是在补充上一次缺失的信息，要把补充信息合并到完整任务里。
 3. 如果仍然缺少信息，也要保留用户原意，便于后续路由询问。
 4. 使用 with_structured_output 输出 resolvedMessage 和 resolutionNotes。
 """
 
 
+# ── 2. 路由提示词 ──────────────────────────────────────────────────────
+# 用途：判断用户意图，提取关键信息，路由到对应模块
+# 调用方：routing.route_message
+# 输入变量：{UserRole} 用户角色、{LongTermMemory} 长期记忆、{KeyFacts} 关键事实、{ResolvedMessage} 消解后消息
+# 输出：RouteOutput 结构，包含 module、intent、route、requiredPermission、importantInfo、missingInfo、assistantMessage
 prompt_ChatRouter = """
 你是智能对话系统的大模型路由器。你需要根据指代消解后的输入，判断用户意图、提取重要关键信息，并路由到对应子链路。
 
@@ -52,6 +70,11 @@ prompt_ChatRouter = """
 """
 
 
+# ── 3. 记忆压缩提示词 ──────────────────────────────────────────────────
+# 用途：将即将从短期记忆移出的旧消息压缩为长期记忆，并维护关键事实
+# 调用方：memory.update_memory
+# 输入变量：{ExistingLongTermMemory} 已有长期记忆、{ExistingKeyFacts} 已有关键事实、{SummaryCandidateMessages} 待压缩消息、{CurrentMessage} 当前消息、{ImportantInfo} 本轮关键信息
+# 输出：MemoryUpdateOutput 结构，包含 longTermMemory 和 keyFacts
 prompt_ChatMemorySummary = """
 你是对话记忆压缩器。请把即将从短期记忆中移出的对话压缩到长期记忆，并维护关键真实信息。
 
@@ -72,12 +95,17 @@ prompt_ChatMemorySummary = """
 
 要求：
 1. longTermMemory 保留对后续任务仍有用的创作上下文、用户偏好、未完成任务、已经确认过的事实。
-2. keyFacts 必须输出结构化 JSON 对象，只保存“真实且稳定”的键值信息，例如 storyId、storyTitle、promptKey、genre、style、targetUserId、targetRole；不要输出自由文本，不要保存推测。
+2. keyFacts 必须输出结构化 JSON 对象，只保存"真实且稳定"的键值信息，例如 storyId、storyTitle、promptKey、genre、style、targetUserId、targetRole；不要输出自由文本，不要保存推测。
 3. 不要让长期记忆无限增长，必要时合并同类项。
 4. 使用 with_structured_output 输出 longTermMemory 和结构化 keyFacts 对象。
 """
 
 
+# ── 4. 子 Agent 提示词 ──────────────────────────────────────────────────
+# 用途：ReAct 模式的子 Agent，根据用户意图选择合适的 Tool 执行
+# 调用方：sub_agents.run_sub_agent
+# 输入变量：{ModuleName} 模块名、{UserRole} 用户角色、{ResolvedMessage} 消解后消息、{Intent} 意图、{ImportantInfo} 关键信息、{MissingInfo} 缺失信息、{LongTermMemory} 长期记忆、{KeyFacts} 关键事实、{tools} 工具列表、{tool_names} 工具名、{input} 输入、{agent_scratchpad} Agent 工作区
+# 输出：SubAgentAction 结构，包含 javaMethod、javaMethodArgs、assistantMessage、missingInfo
 prompt_SubAgentReact = """
 你是 {ModuleName} 子链路的 ReAct Agent。你必须根据用户意图选择合适的 Tool，Tool 会返回要交给 Java 后端执行的方法名和参数。
 

@@ -1,48 +1,116 @@
+# LangChain Tool 定义模块
+# 本文件定义各业务模块的 LangChain Tool，供 ReAct Agent 选择使用。
+# 每个 Tool 对应一个 Java 后端方法，Agent 选择 Tool 后会返回方法名和参数。
+#
+# 工具分类：
+# - 系统工具：ask_missing_info（询问缺失信息）、deny_permission（权限不足提示）
+# - 漫剧工具：story_list、story_detail、story_generate_outline 等
+# - 大纲配置工具：outline_config_list、outline_config_create 等
+# - Prompt 管理工具：prompt_list、prompt_create 等
+# - 用户权限工具：user_list、user_update_role
+
+# json：用于 JSON 序列化和反序列化
 import json
+
+# collections.able.Callable：用于声明工厂函数类型
 from collections.abc import Callable
+
+# typing.Any：用于声明动态类型
 from typing import Any
 
+# LangChain Tool 类
 from langchain_core.tools import Tool
 
 
 def to_json(data: dict[str, Any]) -> str:
+    """将字典序列化为 JSON 字符串。
+
+    Args:
+        data: 要序列化的字典。
+
+    Returns:
+        str: JSON 字符串。
+    """
     return json.dumps(data, ensure_ascii=False)
 
 
 def parse_tool_input(raw_input: str) -> dict[str, Any]:
+    """解析 Tool 的输入参数。
+
+    输入可能是 JSON 字符串或普通文本，统一解析为字典。
+
+    Args:
+        raw_input: 原始输入字符串。
+
+    Returns:
+        dict: 解析后的参数字典。
+    """
     if not raw_input:
         return {}
+
+    # 如果已经是字典，直接返回
     if isinstance(raw_input, dict):
         return raw_input
+
+    # 尝试 JSON 解析
     try:
         parsed = json.loads(raw_input)
         return parsed if isinstance(parsed, dict) else {}
     except json.JSONDecodeError:
+        # 解析失败，将原始文本作为 rawText 返回
         return {"rawText": str(raw_input)}
 
 
 def ask_missing_info(raw_input: str) -> str:
+    """系统工具：询问用户补充缺失信息。
+
+    当 Agent 判断用户输入缺少必要信息时调用此工具。
+
+    Args:
+        raw_input: JSON 字符串，包含 missingInfo 数组和可选的 question。
+
+    Returns:
+        str: JSON 格式的执行结果。
+    """
     data = parse_tool_input(raw_input)
+
+    # 提取缺失信息列表
     missing = data.get("missingInfo") or data.get("missing") or []
     if isinstance(missing, str):
         missing = [missing]
+
+    # 提取询问消息
     question = data.get("question") or data.get("assistantMessage")
     if not question:
         question = "还缺少一些必要信息，请补充：" + "、".join(missing or ["必要参数"])
+
     return to_json({
-        "javaMethod": "story.none",
-        "javaMethodArgs": {},
-        "assistantMessage": question,
-        "missingInfo": missing,
+        "javaMethod": "story.none",      # 不执行 Java 方法
+        "javaMethodArgs": {},             # 无参数
+        "assistantMessage": question,     # 询问消息
+        "missingInfo": missing,           # 缺失信息列表
     })
 
 
 def deny_permission(raw_input: str) -> str:
+    """系统工具：提示用户权限不足。
+
+    当 Agent 判断用户权限不足以执行操作时调用此工具。
+
+    Args:
+        raw_input: JSON 字符串，包含 requiredPermission。
+
+    Returns:
+        str: JSON 格式的执行结果。
+    """
     data = parse_tool_input(raw_input)
+
+    # 提取所需权限
     required = data.get("requiredPermission") or data.get("requiredRole") or "更高权限"
+
     return to_json({
-        "javaMethod": "story.none",
-        "javaMethodArgs": {},
+        "javaMethod": "story.none",      # 不执行 Java 方法
+        "javaMethodArgs": {},             # 无参数
         "assistantMessage": f"当前账号没有执行该操作的权限，需要 {required} 权限。",
         "missingInfo": [],
     })
@@ -56,13 +124,44 @@ def make_action_tool(
         optional_fields: list[str] | None = None,
         aliases: dict[str, str] | None = None,
 ) -> Tool:
+    """创建业务动作 Tool 工厂函数。
+
+    每个 Tool 对应一个 Java 方法，Agent 选择 Tool 后会：
+    1. 解析输入参数
+    2. 校验必填字段
+    3. 返回 Java 方法名和参数
+
+    Args:
+        name:            工具名称。
+        description:     工具描述，Agent 根据描述选择工具。
+        java_method:     对应的 Java 方法名。
+        required_fields: 必填字段列表。
+        optional_fields: 可选字段列表。
+        aliases:         字段别名映射，如 {"id": "storyId"}。
+
+    Returns:
+        Tool: LangChain Tool 实例。
+    """
     required = required_fields or []
     optional = optional_fields or []
     field_aliases = aliases or {}
 
     def run(raw_input: str) -> str:
+        """Tool 执行函数。
+
+        Args:
+            raw_input: JSON 格式的输入参数。
+
+        Returns:
+            str: JSON 格式的执行结果。
+        """
+        # 解析输入
         data = parse_tool_input(raw_input)
+
+        # 归一化参数（处理别名）
         normalized = normalize_args(data, field_aliases)
+
+        # 校验必填字段
         missing = [field for field in required if is_blank(normalized.get(field))]
         if missing:
             return to_json({
@@ -72,18 +171,21 @@ def make_action_tool(
                 "missingInfo": missing,
             })
 
+        # 提取参数（只保留 required + optional 中定义的字段）
         args = {
             field: normalized.get(field)
             for field in required + optional
             if normalized.get(field) is not None
         }
+
         return to_json({
-            "javaMethod": java_method,
-            "javaMethodArgs": args,
+            "javaMethod": java_method,       # Java 方法名
+            "javaMethodArgs": args,           # 方法参数
             "assistantMessage": "我已经准备好执行该操作。",
             "missingInfo": [],
         })
 
+    # 创建 LangChain Tool
     return Tool.from_function(
         name=name,
         description=description,
@@ -92,6 +194,17 @@ def make_action_tool(
 
 
 def normalize_args(data: dict[str, Any], aliases: dict[str, str]) -> dict[str, Any]:
+    """归一化参数，处理字段别名。
+
+    如果源字段存在但目标字段不存在，将源字段的值复制到目标字段。
+
+    Args:
+        data:    原始参数字典。
+        aliases: 别名映射，如 {"id": "storyId"}。
+
+    Returns:
+        dict: 归一化后的参数字典。
+    """
     normalized = dict(data)
     for source, target in aliases.items():
         if source in normalized and target not in normalized:
@@ -100,10 +213,29 @@ def normalize_args(data: dict[str, Any], aliases: dict[str, str]) -> dict[str, A
 
 
 def is_blank(value: Any) -> bool:
+    """判断值是否为空（None 或空字符串）。
+
+    Args:
+        value: 要判断的值。
+
+    Returns:
+        bool: 为空返回 True。
+    """
     return value is None or (isinstance(value, str) and not value.strip())
 
 
+# ── 系统工具 ──────────────────────────────────────────────────────────
+
 def system_tools() -> list[Tool]:
+    """获取系统工具列表。
+
+    系统工具包括：
+    - ask_missing_info: 询问用户补充缺失信息
+    - deny_permission: 提示用户权限不足
+
+    Returns:
+        list[Tool]: 系统工具列表。
+    """
     return [
         Tool.from_function(
             name="ask_missing_info",
@@ -118,7 +250,16 @@ def system_tools() -> list[Tool]:
     ]
 
 
+# ── 漫剧工具 ──────────────────────────────────────────────────────────
+
 def manga_tools() -> list[Tool]:
+    """获取漫剧模块工具列表。
+
+    包含漫剧的增删改查、大纲生成/修改、分卷/小节/资产/脚本生成等操作。
+
+    Returns:
+        list[Tool]: 漫剧工具列表。
+    """
     return system_tools() + [
         make_action_tool(
             "story_list",
@@ -200,7 +341,16 @@ def manga_tools() -> list[Tool]:
     ]
 
 
+# ── 大纲配置工具 ──────────────────────────────────────────────────────
+
 def outline_config_tools() -> list[Tool]:
+    """获取大纲配置模块工具列表。
+
+    包含题材和漫剧风格配置的增删改查操作。
+
+    Returns:
+        list[Tool]: 大纲配置工具列表。
+    """
     return system_tools() + [
         make_action_tool(
             "outline_config_list",
@@ -235,7 +385,16 @@ def outline_config_tools() -> list[Tool]:
     ]
 
 
+# ── Prompt 管理工具 ──────────────────────────────────────────────────
+
 def prompt_management_tools() -> list[Tool]:
+    """获取 Prompt 管理模块工具列表。
+
+    包含 Prompt 的增删改查和默认/特定配置操作。
+
+    Returns:
+        list[Tool]: Prompt 管理工具列表。
+    """
     return system_tools() + [
         make_action_tool(
             "prompt_list",
@@ -281,7 +440,16 @@ def prompt_management_tools() -> list[Tool]:
     ]
 
 
+# ── 用户权限工具 ──────────────────────────────────────────────────────
+
 def user_permission_tools() -> list[Tool]:
+    """获取用户权限模块工具列表。
+
+    包含用户列表查询和权限等级修改操作。
+
+    Returns:
+        list[Tool]: 用户权限工具列表。
+    """
     return system_tools() + [
         make_action_tool(
             "user_list",
@@ -298,16 +466,34 @@ def user_permission_tools() -> list[Tool]:
     ]
 
 
+# ── 模块工具工厂映射 ──────────────────────────────────────────────────
+
+# 模块名 → 工具工厂函数的映射表
 MODULE_TOOL_FACTORY: dict[str, Callable[[], list[Tool]]] = {
-    "manga": manga_tools,
-    "outline_config": outline_config_tools,
-    "prompt_management": prompt_management_tools,
-    "user_permission": user_permission_tools,
+    "manga": manga_tools,                        # 漫剧模块
+    "outline_config": outline_config_tools,      # 大纲配置模块
+    "prompt_management": prompt_management_tools, # Prompt 管理模块
+    "user_permission": user_permission_tools,    # 用户权限模块
 }
 
 
 def get_tools_for_module(module: str) -> list[Tool]:
+    """获取指定模块的工具列表。
+
+    如果模块名不在映射表中，返回系统工具列表。
+
+    Args:
+        module: 模块名。
+
+    Returns:
+        list[Tool]: 该模块的工具列表。
+    """
+    # 查找工厂函数
     factory = MODULE_TOOL_FACTORY.get((module or "").strip().lower())
+
+    # 如果找不到，返回系统工具
     if factory is None:
         return system_tools()
+
+    # 调用工厂函数生成工具列表
     return factory()
