@@ -1846,3 +1846,50 @@
 - [ ] 重启 Python FastAPI / RabbitMQ worker，让剧情大纲结构化输出保护逻辑生效。
 - [ ] 之前已经发布失败结果的旧任务不会自动恢复；请在前端重新发起一次“生成剧情大纲”任务。
 - [ ] 如果前端看到“临时降级大纲”，说明模型连续两次没有返回正确结构，可稍后重新生成，或检查 Prompt 管理中对应题材/风格的特定 Prompt 是否误导模型输出了输入参数。
+
+## 2026-05-23 功能权限管理
+### 数据库
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260523_create_feature_permissions.sql`，创建 `feature_permissions` 表。
+- [x] 表字段包含 `feature_key`、功能名称、分类、说明、允许角色、启用状态和排序。
+- [x] 默认功能点覆盖对话、漫剧列表/详情、剧情大纲生成、分卷/小节/资产/脚本生成、大纲配置、Prompt 管理、用户权限和功能权限管理。
+- [x] `init.sql` 已同步功能权限表和默认数据，新环境初始化时直接具备该能力。
+### 后端
+- [x] 新增功能权限实体、Mapper、DTO、Service 和 `/api/feature-permissions` 管理接口。
+- [x] `GET /api/feature-permissions` 和 `PUT /api/feature-permissions/{id}` 仅 root 可用。
+- [x] `GET /api/feature-permissions/me` 返回当前用户可用功能 key，供前端隐藏入口。
+- [x] `PermissionService` 新增 `requireFeature` / `hasFeature`，root 始终拥有全部功能权限。
+- [x] 剧情大纲生成等漫剧关键操作、大纲配置管理、Prompt 管理和对话系统已接入功能权限校验。
+- [x] SQL 未执行时，后端会按旧角色规则兜底，避免系统启动后立即不可用。
+### 前端
+- [x] 新增功能权限管理页 `/feature-permissions`，root 可按功能分类设置 ROOT/ADMIN/USER 允许角色。
+- [x] 顶部导航新增“功能权限”入口。
+- [x] 大纲配置和 Prompt 管理入口优先根据 `/api/feature-permissions/me` 隐藏或显示，接口失败时按旧角色规则兜底。
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml -q compile`。
+- [x] 前端构建成功：`npm run build`。
+- [x] `git diff --check` 无格式错误，仅有既有 CRLF 提示。
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260523_create_feature_permissions.sql`。
+- [ ] 重启 Java 后端，让功能权限表、接口和后端校验生效。
+- [ ] 重启或刷新前端服务，使用 root 登录后进入“功能权限”页面配置各功能允许角色。
+
+## 2026-05-23 功能权限管理同步到对话系统
+### Python 对话链路
+- [x] `chat_agent_pkg` 新增 `feature_permission` 子链路，功能权限管理请求可以被路由到独立模块，不再和用户权限模块混在一起。
+- [x] 新增 `feature_permission_list` 和 `feature_permission_update` 两个 ReAct Tool，分别返回 `featurePermission.list` 和 `featurePermission.update` 给 Java 白名单执行。
+- [x] Python 权限预判中 `feature_permission` 需要 `ROOT`，普通用户和 admin 会在子链路阶段被提前拒绝。
+- [x] 路由器增加轻量兜底：明确提到“功能权限/featurePermission”的请求会强制进入 `feature_permission` 模块，降低旧 Prompt 或模型误路由概率。
+### Java 后端
+- [x] `FeaturePermissionService` 新增按 `featureKey` 更新功能权限的方法，方便对话系统按功能 key 操作。
+- [x] `ChatServiceImpl` 白名单新增 `featurePermission.list` 和 `featurePermission.update`，由 Java 服务层二次执行 root 权限校验。
+- [x] 对话更新功能权限时支持 `allowedRoles` 传数组或逗号/空格分隔字符串；支持按 `id` 或 `featureKey` 定位功能。
+### Prompt
+- [x] 内置 `chat_router` fallback Prompt 已补充 `feature_permission` 模块说明。
+- [x] `backend/src/main/resources/db/20260523_create_intelligent_chat_prompts.sql` 已同步更新 `chat_router` 默认数据。
+### 验证结果
+- [x] 后端编译成功：`mvn -gs ..\settings.phase1.xml -q compile`。
+- [x] Python 对话工具导入成功：`feature_permission` 模块已加载 `feature_permission_list` 和 `feature_permission_update`。
+- [x] `git diff --check` 无格式错误，仅有既有 LF/CRLF 提示。
+### 需要你做的事情
+- [ ] 如果之前已经执行过 `backend/src/main/resources/db/20260523_create_intelligent_chat_prompts.sql`，请重新执行该 SQL，或在 Prompt 管理里手动更新 `chat_router`，让数据库中的路由 Prompt 也知道 `feature_permission` 模块。
+- [ ] 重启 Java 后端和 Python FastAPI，让新的对话白名单、Tool 和路由逻辑生效。

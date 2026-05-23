@@ -90,7 +90,7 @@ def route_message(
     """执行意图路由，判断用户意图并路由到对应模块。
 
     路由结果包含：
-    - module: 目标模块（manga/outline_config/prompt_management/user_permission/general）
+    - module: 目标模块（manga/outline_config/prompt_management/user_permission/feature_permission/general）
     - intent: 用户意图（如 story_generate、prompt_update）
     - importantInfo: 提取的关键信息
     - missingInfo: 缺失的必要信息
@@ -114,19 +114,88 @@ def route_message(
     ) | Router.with_structured_output(RouteOutput)
 
     # 调用大模型
-    return invoke_llm_with_retry(
+    route = invoke_llm_with_retry(
         chain,
         {
             "UserRole": request.user_role,                                      # 用户角色
             "LongTermMemory": request.long_term_memory or "无",                 # 长期记忆
             "KeyFacts": json.dumps(request.key_facts or {}, ensure_ascii=False),  # 关键事实
             "ResolvedMessage": resolved_message,                                # 消解后消息
-            "AvailableModules": "manga, outline_config, prompt_management, user_permission, general",  # 可用模块
+            "AvailableModules": "manga, outline_config, prompt_management, user_permission, feature_permission, general",  # 可用模块
         },
         trace_id=trace_id,
         started_at=started_at,
         scope="chat-router",  # 日志前缀
     )
+    return normalize_feature_permission_route(route, resolved_message)
+
+
+def normalize_feature_permission_route(route: RouteOutput, resolved_message: str) -> RouteOutput:
+    """将明确的功能权限管理请求兜底归一到 feature_permission 模块。
+
+    调用方：route_message。
+    """
+    text = resolved_message or ""
+    lower_text = text.lower()
+    explicit_keywords = [
+        "功能权限",
+        "功能管理",
+        "功能模块权限",
+        "featurepermission",
+        "feature permission",
+    ]
+    permission_action_keywords = [
+        "权限",
+        "开放",
+        "允许",
+        "禁止",
+        "禁用",
+        "只允许",
+        "只开放",
+        "仅允许",
+        "可用",
+        "不可用",
+        "启用",
+        "关闭",
+    ]
+    feature_subject_keywords = [
+        "chat.use",
+        "story.generate",
+        "story.reviseoutline",
+        "story.generatevolumeoutline",
+        "story.generatevolumesections",
+        "story.generatesectionassets",
+        "story.generatesectionscript",
+        "outlineconfig.manage",
+        "prompt.manage",
+        "user.manage",
+        "featurepermission.manage",
+        "对话",
+        "剧情大纲",
+        "大纲生成",
+        "生成漫剧",
+        "分卷",
+        "小节",
+        "人物",
+        "场景",
+        "图片",
+        "脚本",
+        "大纲配置",
+        "prompt",
+    ]
+    is_explicit_feature_permission = any(keyword.lower() in lower_text for keyword in explicit_keywords)
+    looks_like_feature_permission_update = (
+        any(keyword in text for keyword in permission_action_keywords)
+        and any(keyword.lower() in lower_text for keyword in feature_subject_keywords)
+    )
+    if is_explicit_feature_permission or looks_like_feature_permission_update:
+        route.module = "feature_permission"
+        route.required_permission = "ROOT"
+        if not route.intent or route.intent == "general_chat":
+            route.intent = "feature_permission_manage"
+        if not route.route or route.route == "no_action":
+            route.route = "feature_permission"
+    return route
 
 
 def normalize_important_info(route: RouteOutput) -> str:

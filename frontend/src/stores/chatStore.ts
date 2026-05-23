@@ -42,6 +42,11 @@ export const useChatStore = defineStore('chat', () => {
       const history = await chatApi.getHistory(sessionId);
       messages.value = Array.isArray(history) ? history : [];
       connectWebSocket(sessionId);
+    } catch (error) {
+      if (isSessionNotFoundError(error)) {
+        removeLocalSession(sessionId);
+      }
+      throw error;
     } finally {
       isLoading.value = false;
     }
@@ -81,13 +86,14 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function deleteSession(sessionId: number) {
-    await chatApi.deleteSession(sessionId);
-    sessions.value = sessions.value.filter((session) => session.id !== sessionId);
-    if (currentSessionId.value === sessionId) {
-      currentSessionId.value = null;
-      messages.value = [];
-      disconnectWebSocket();
+    try {
+      await chatApi.deleteSession(sessionId);
+    } catch (error) {
+      if (!isSessionNotFoundError(error)) {
+        throw error;
+      }
     }
+    removeLocalSession(sessionId);
   }
 
   function connectWebSocket(sessionId: number) {
@@ -161,6 +167,15 @@ export const useChatStore = defineStore('chat', () => {
     ];
   }
 
+  function removeLocalSession(sessionId: number) {
+    sessions.value = sessions.value.filter((session) => session.id !== sessionId);
+    if (currentSessionId.value === sessionId) {
+      currentSessionId.value = null;
+      messages.value = [];
+      disconnectWebSocket();
+    }
+  }
+
   function upsertMessage(message: MessageResponse) {
     const exists = messages.value.some((item) => item.id === message.id);
     if (!exists) {
@@ -190,6 +205,15 @@ export const useChatStore = defineStore('chat', () => {
       content,
       createdAt: new Date().toISOString(),
     });
+  }
+
+  function isSessionNotFoundError(error: unknown) {
+    if (typeof error !== 'object' || error === null) {
+      return false;
+    }
+    const maybeAxiosError = error as { response?: { data?: { message?: string } }; message?: string };
+    const message = maybeAxiosError.response?.data?.message || maybeAxiosError.message || '';
+    return message.includes('Session not found');
   }
 
   return {

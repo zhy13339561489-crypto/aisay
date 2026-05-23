@@ -1,6 +1,7 @@
 package com.aisay.manga.service.impl;
 
 import com.aisay.manga.config.AiRabbitConstants;
+import com.aisay.manga.config.FeaturePermissionKeys;
 import com.aisay.manga.dto.ai.AiStoryTaskMessage;
 import com.aisay.manga.dto.ai.AiStoryTaskResultMessage;
 import com.aisay.manga.dto.ai.StoryAssetReference;
@@ -31,6 +32,7 @@ import com.aisay.manga.repository.StorySectionScriptMapper;
 import com.aisay.manga.repository.StoryVolumeOutlineMapper;
 import com.aisay.manga.repository.StoryVolumeSectionMapper;
 import com.aisay.manga.service.StoryService;
+import com.aisay.manga.service.PermissionService;
 import com.aisay.manga.utils.AiStoryTaskPublisher;
 import com.aisay.manga.utils.LocalFileStorageUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
@@ -88,6 +90,8 @@ public class StoryServiceImpl implements StoryService {
 
     private final AiStoryTaskPublisher aiStoryTaskPublisher;
 
+    private final PermissionService permissionService;
+
     /**
      * 作用：注入故事、角色、分卷大纲数据访问对象，以及 RabbitMQ AI 任务发布器。
      * 调用方：Spring 容器启动时自动构造 StoryServiceImpl。
@@ -101,7 +105,8 @@ public class StoryServiceImpl implements StoryService {
             StorySectionAssetMapper storySectionAssetMapper,
             StorySectionScriptMapper storySectionScriptMapper,
             LocalFileStorageUtil localFileStorageUtil,
-            AiStoryTaskPublisher aiStoryTaskPublisher
+            AiStoryTaskPublisher aiStoryTaskPublisher,
+            PermissionService permissionService
     ) {
         this.storyMapper = storyMapper;
         this.characterMapper = characterMapper;
@@ -112,6 +117,7 @@ public class StoryServiceImpl implements StoryService {
         this.storySectionScriptMapper = storySectionScriptMapper;
         this.localFileStorageUtil = localFileStorageUtil;
         this.aiStoryTaskPublisher = aiStoryTaskPublisher;
+        this.permissionService = permissionService;
     }
 
     /**
@@ -121,6 +127,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryResponse generateStory(Long userId, StoryGenerateRequest request) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_GENERATE);
         LocalDateTime now = LocalDateTime.now();
 
         Story story = new Story();
@@ -153,6 +160,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse reviseStoryOutline(Long storyId, Long userId, StoryOutlineReviseRequest request) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_REVISE_OUTLINE);
         Story story = getOwnedStory(storyId, userId);
         story.setStatus(STORY_STATUS_REVISING);
         story.setUpdatedAt(LocalDateTime.now());
@@ -177,6 +185,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse updateStoryDetail(Long storyId, Long userId, StoryDetailUpdateRequest request) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_UPDATE_DETAIL);
         Story story = getOwnedStory(storyId, userId);
         if (request.getSynopsis() != null) {
             story.setSynopsis(request.getSynopsis());
@@ -203,6 +212,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse generateVolumeOutline(Long storyId, Long userId) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_GENERATE_VOLUME_OUTLINE);
         Story story = getOwnedStory(storyId, userId);
         if (story.getFullContent() == null || story.getFullContent().isBlank()) {
             throw new IllegalArgumentException("Please generate or fill in the story outline before generating volume outlines.");
@@ -232,6 +242,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse reviseVolumeOutline(Long storyId, Long userId, StoryVolumeOutlineReviseRequest request) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_REVISE_VOLUME_OUTLINE);
         Story story = getOwnedStory(storyId, userId);
         List<StoryVolumeOutline> existingVolumes = getVolumeOutlineEntities(storyId);
         if (existingVolumes.isEmpty()) {
@@ -266,6 +277,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse generateVolumeSections(Long storyId, Long volumeId, Long userId) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_GENERATE_VOLUME_SECTIONS);
         Story story = getOwnedStory(storyId, userId);
         StoryVolumeOutline volume = getOwnedVolume(storyId, volumeId);
         if (volume.getContent() == null || volume.getContent().isBlank()) {
@@ -299,6 +311,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse generateSectionAssets(Long storyId, Long sectionId, Long userId) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_GENERATE_SECTION_ASSETS);
         Story story = getOwnedStory(storyId, userId);
         StoryVolumeSection section = getOwnedSection(storyId, sectionId);
         if (section.getContent() == null || section.getContent().isBlank()) {
@@ -333,6 +346,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse generateSectionScript(Long storyId, Long sectionId, Long userId) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_GENERATE_SECTION_SCRIPT);
         Story story = getOwnedStory(storyId, userId);
         StoryVolumeSection section = getOwnedSection(storyId, sectionId);
         if (section.getContent() == null || section.getContent().isBlank()) {
@@ -366,6 +380,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse updateVolumeOutlines(Long storyId, Long userId, StoryVolumeOutlineUpdateRequest request) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_UPDATE_VOLUME_OUTLINE);
         Story story = getOwnedStory(storyId, userId);
         List<StoryVolumeOutlineGenerateResponse.VolumeOutlineItem> volumes = request.getVolumes().stream()
                 .map(this::toAiVolumeOutlineItem)
@@ -419,6 +434,7 @@ public class StoryServiceImpl implements StoryService {
      */
     @Override
     public StoryDetailResponse getStoryDetail(Long storyId, Long userId) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_DETAIL);
         Story story = getOwnedStory(storyId, userId);
         List<Character> characters = characterMapper.selectList(new LambdaQueryWrapper<Character>()
                 .eq(Character::getStoryId, storyId)
@@ -448,6 +464,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryDetailResponse uploadCharacterAudio(Long storyId, Long assetId, Long userId, MultipartFile file) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_UPLOAD_ASSET_AUDIO);
         getOwnedStory(storyId, userId);
         StoryAsset asset = getOwnedStoryAsset(storyId, assetId);
         if (!"CHARACTER".equalsIgnoreCase(asset.getAssetType())) {
@@ -467,6 +484,7 @@ public class StoryServiceImpl implements StoryService {
      */
     @Override
     public Page<StoryResponse> getUserStories(Long userId, int page, int size) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_LIST);
         Page<Story> storyPage = storyMapper.selectPageByUserId(new Page<>(Math.max(page, 1), Math.max(size, 1)), userId);
         Page<StoryResponse> responsePage = new Page<>(storyPage.getCurrent(), storyPage.getSize(), storyPage.getTotal());
         responsePage.setRecords(storyPage.getRecords().stream().map(this::toStoryResponse).toList());
@@ -480,6 +498,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public StoryResponse updateStory(Long storyId, Long userId, StoryUpdateRequest request) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_UPDATE_BASIC);
         Story story = getOwnedStory(storyId, userId);
         if (request.getTitle() != null) {
             story.setTitle(request.getTitle());
@@ -505,6 +524,7 @@ public class StoryServiceImpl implements StoryService {
     @Override
     @Transactional
     public void deleteStory(Long storyId, Long userId) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.STORY_DELETE);
         Story story = getOwnedStory(storyId, userId);
         storyMapper.deleteById(story.getId());
     }

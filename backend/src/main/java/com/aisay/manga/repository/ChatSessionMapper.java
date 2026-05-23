@@ -6,7 +6,9 @@ import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
 import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.Update;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @Mapper
@@ -47,4 +49,17 @@ public interface ChatSessionMapper extends BaseMapper<ChatSession> {
                 last_active = VALUES(last_active)
             """)
     void upsertWithId(ChatSession session);
+
+    @Update("""
+            UPDATE chat_sessions
+            SET status = 'deleted',
+                last_active = #{lastActive}
+            WHERE id = #{sessionId}
+              AND user_id = #{userId}
+            """)
+    int markDeletedByIdAndUserId(
+            @Param("sessionId") Long sessionId,
+            @Param("userId") Long userId,
+            @Param("lastActive") LocalDateTime lastActive
+    );
 }

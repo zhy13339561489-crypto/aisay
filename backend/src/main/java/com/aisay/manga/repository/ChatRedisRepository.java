@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,6 +32,8 @@ public class ChatRedisRepository {
     private static final String SUMMARY_CURSOR_KEY_PREFIX = "aisay:chat:memory:summary-cursor:";
 
     private static final String SESSION_STATUS_DELETED = "deleted";
+
+    private static final Duration MYSQL_MISSING_SESSION_GRACE = Duration.ofMinutes(2);
 
     private final StringRedisTemplate redisTemplate;
 
@@ -73,9 +77,42 @@ public class ChatRedisRepository {
      * 作用：按 ID 从 Redis 读取会话，未命中时从 MySQL 回填。
      * 调用方：ChatServiceImpl 校验会话归属和状态时。
      */
+    public void removeSessionReference(Long userId, Long sessionId) {
+        if (userId == null || sessionId == null) {
+            return;
+        }
+        redisTemplate.opsForZSet().remove(userSessionsKey(userId), String.valueOf(sessionId));
+    }
+
+    public void markSessionDeleted(Long userId, Long sessionId) {
+        if (userId == null || sessionId == null) {
+            return;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        ChatSession tombstone = readJson(sessionKey(sessionId), ChatSession.class);
+        if (tombstone == null) {
+            tombstone = new ChatSession();
+            tombstone.setId(sessionId);
+            tombstone.setUserId(userId);
+        }
+        tombstone.setStatus(SESSION_STATUS_DELETED);
+        tombstone.setLastActive(now);
+        writeJson(sessionKey(sessionId), tombstone);
+        removeSessionReference(userId, sessionId);
+        try {
+            chatSessionMapper.markDeletedByIdAndUserId(sessionId, userId, now);
+        } catch (RuntimeException ex) {
+            // MySQL is an async persistence copy; keep the Redis tombstone to block stale rows from reappearing.
+        }
+    }
+
     public ChatSession getSession(Long sessionId) {
         ChatSession cached = readJson(sessionKey(sessionId), ChatSession.class);
         if (cached != null) {
+            if (shouldDropCachedSession(cached)) {
+                markSessionDeleted(cached.getUserId(), cached.getId());
+                return null;
+            }
             return cached;
         }
 
@@ -103,9 +140,16 @@ public class ChatRedisRepository {
             cachedSessionIds = Set.of();
         }
         for (String sessionIdValue : cachedSessionIds) {
-            ChatSession session = getSession(Long.valueOf(sessionIdValue));
+            Long sessionId = parseSessionId(sessionIdValue);
+            if (sessionId == null) {
+                redisTemplate.opsForZSet().remove(userSessionsKey, sessionIdValue);
+                continue;
+            }
+            ChatSession session = getSession(sessionId);
             if (isVisibleSession(session, userId)) {
                 merged.put(session.getId(), session);
+            } else {
+                removeSessionReference(userId, sessionId);
             }
         }
 
@@ -116,6 +160,11 @@ public class ChatRedisRepository {
                     .orderByDesc(ChatSession::getLastActive)
                     .orderByDesc(ChatSession::getId));
             for (ChatSession session : persistedSessions) {
+                ChatSession cachedSession = readJson(sessionKey(session.getId()), ChatSession.class);
+                if (cachedSession != null && SESSION_STATUS_DELETED.equals(cachedSession.getStatus())) {
+                    markSessionDeleted(userId, session.getId());
+                    continue;
+                }
                 saveSession(session);
                 merged.putIfAbsent(session.getId(), session);
             }
@@ -266,6 +315,35 @@ public class ChatRedisRepository {
         return session != null
                 && userId.equals(session.getUserId())
                 && !SESSION_STATUS_DELETED.equals(session.getStatus());
+    }
+
+    private boolean shouldDropCachedSession(ChatSession cached) {
+        if (cached.getId() == null || cached.getUserId() == null || SESSION_STATUS_DELETED.equals(cached.getStatus())) {
+            return true;
+        }
+        try {
+            ChatSession persisted = chatSessionMapper.selectById(cached.getId());
+            if (persisted == null) {
+                return isOldEnoughToTreatMysqlMissingAsDeleted(cached);
+            }
+            return SESSION_STATUS_DELETED.equals(persisted.getStatus());
+        } catch (RuntimeException ex) {
+            // When MySQL is temporarily unavailable, keep Redis as the real-time chat source.
+            return false;
+        }
+    }
+
+    private boolean isOldEnoughToTreatMysqlMissingAsDeleted(ChatSession cached) {
+        LocalDateTime referenceTime = cached.getStartedAt() != null ? cached.getStartedAt() : cached.getLastActive();
+        return referenceTime == null || referenceTime.plus(MYSQL_MISSING_SESSION_GRACE).isBefore(LocalDateTime.now());
+    }
+
+    private Long parseSessionId(String sessionIdValue) {
+        try {
+            return Long.valueOf(sessionIdValue);
+        } catch (NumberFormatException ex) {
+            return null;
+        }
     }
 
     private long toEpochMillis(ChatSession session) {

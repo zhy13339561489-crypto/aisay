@@ -107,8 +107,8 @@ class RouteOutput(BaseModel):
     大模型判断用户意图后，路由到对应模块并提取关键信息。
     """
 
-    # 目标模块：manga（漫剧）、outline_config（大纲配置）、prompt_management（Prompt管理）、user_permission（用户权限）、general（闲聊）
-    module: str = Field(description="manga, outline_config, prompt_management, user_permission, or general")
+    # 目标模块：manga（漫剧）、outline_config（大纲配置）、prompt_management（Prompt管理）、user_permission（用户权限）、feature_permission（功能权限）、general（闲聊）
+    module: str = Field(description="manga, outline_config, prompt_management, user_permission, feature_permission, or general")
 
     # 用户意图，如 story_generate、prompt_update、user_role_update
     intent: str

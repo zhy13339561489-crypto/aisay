@@ -1,11 +1,13 @@
 package com.aisay.manga.service.impl;
 
+import com.aisay.manga.config.FeaturePermissionKeys;
 import com.aisay.manga.dto.ai.ChatAgentRequest;
 import com.aisay.manga.dto.ai.ChatAgentResponse;
 import com.aisay.manga.dto.ai.ChatMemoryMessage;
 import com.aisay.manga.dto.ai.StoryOutlineGenerateResponse;
 import com.aisay.manga.dto.request.AiPromptRequest;
 import com.aisay.manga.dto.request.ChatStartRequest;
+import com.aisay.manga.dto.request.FeaturePermissionRequest;
 import com.aisay.manga.dto.request.SendMessageRequest;
 import com.aisay.manga.dto.request.StoryDetailUpdateRequest;
 import com.aisay.manga.dto.request.StoryGenerateRequest;
@@ -16,6 +18,7 @@ import com.aisay.manga.dto.request.StoryVolumeOutlineReviseRequest;
 import com.aisay.manga.dto.request.UserRoleUpdateRequest;
 import com.aisay.manga.dto.response.AiPromptResponse;
 import com.aisay.manga.dto.response.ChatSessionResponse;
+import com.aisay.manga.dto.response.FeaturePermissionResponse;
 import com.aisay.manga.dto.response.MessageResponse;
 import com.aisay.manga.dto.response.StoryDetailResponse;
 import com.aisay.manga.dto.response.StoryOutlineOptionResponse;
@@ -30,6 +33,7 @@ import com.aisay.manga.repository.ChatRedisRepository;
 import com.aisay.manga.repository.StoryMapper;
 import com.aisay.manga.service.AiPromptService;
 import com.aisay.manga.service.ChatService;
+import com.aisay.manga.service.FeaturePermissionService;
 import com.aisay.manga.service.PermissionService;
 import com.aisay.manga.service.StoryOutlineOptionService;
 import com.aisay.manga.service.StoryService;
@@ -98,6 +102,8 @@ public class ChatServiceImpl implements ChatService {
 
     private final UserService userService;
 
+    private final FeaturePermissionService featurePermissionService;
+
     private final PermissionService permissionService;
 
     /**
@@ -116,6 +122,7 @@ public class ChatServiceImpl implements ChatService {
             StoryOutlineOptionService storyOutlineOptionService,
             AiPromptService aiPromptService,
             UserService userService,
+            FeaturePermissionService featurePermissionService,
             PermissionService permissionService
     ) {
         this.chatRedisRepository = chatRedisRepository;
@@ -129,6 +136,7 @@ public class ChatServiceImpl implements ChatService {
         this.storyOutlineOptionService = storyOutlineOptionService;
         this.aiPromptService = aiPromptService;
         this.userService = userService;
+        this.featurePermissionService = featurePermissionService;
         this.permissionService = permissionService;
     }
 
@@ -139,6 +147,7 @@ public class ChatServiceImpl implements ChatService {
     @Override
     @Transactional
     public ChatSessionResponse startSession(Long userId, ChatStartRequest request) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.CHAT_USE);
         LocalDateTime now = LocalDateTime.now();
 
         ChatSession session = new ChatSession();
@@ -165,6 +174,7 @@ public class ChatServiceImpl implements ChatService {
      */
     @Override
     public List<MessageResponse> getHistory(Long sessionId, Long userId) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.CHAT_USE);
         getOwnedActiveSession(sessionId, userId);
         return chatRedisRepository.getMessages(sessionId)
                 .stream()
@@ -179,10 +189,18 @@ public class ChatServiceImpl implements ChatService {
     @Override
     @Transactional
     public void deleteSession(Long sessionId, Long userId) {
-        ChatSession session = getOwnedActiveSession(sessionId, userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.CHAT_USE);
+        ChatSession session;
+        try {
+            session = getOwnedActiveSession(sessionId, userId);
+        } catch (NoSuchElementException ex) {
+            chatRedisRepository.markSessionDeleted(userId, sessionId);
+            return;
+        }
         session.setStatus(SESSION_STATUS_DELETED);
         session.setLastActive(LocalDateTime.now());
         chatRedisRepository.saveSession(session);
+        chatRedisRepository.markSessionDeleted(userId, sessionId);
         chatPersistPublisher.publishSessionUpsert(session);
     }
 
@@ -192,6 +210,7 @@ public class ChatServiceImpl implements ChatService {
      */
     @Override
     public List<ChatSessionResponse> getUserSessions(Long userId) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.CHAT_USE);
         return chatRedisRepository.getUserSessions(userId)
                 .stream()
                 .map(this::toSessionResponse)
@@ -205,6 +224,7 @@ public class ChatServiceImpl implements ChatService {
     @Override
     @Transactional
     public MessageResponse sendMessage(Long userId, SendMessageRequest request) {
+        permissionService.requireFeature(userId, FeaturePermissionKeys.CHAT_USE);
         ChatSession session = getOwnedActiveSession(request.getSessionId(), userId);
         LocalDateTime now = LocalDateTime.now();
 
@@ -297,6 +317,8 @@ public class ChatServiceImpl implements ChatService {
                 case "prompt.delete" -> dispatchPromptDelete(userId, args);
                 case "user.list" -> formatUsers(userService.listUsers(userId));
                 case "user.updateRole" -> formatUser(userService.updateUserRole(userId, requireLongArg(args, "targetUserId"), new UserRoleUpdateRequest(requireStringArg(args, "role"))));
+                case "featurePermission.list" -> formatFeaturePermissions(featurePermissionService.listPermissions(userId));
+                case "featurePermission.update" -> formatFeaturePermission(dispatchFeaturePermissionUpdate(userId, args));
                 default -> "当前 Java 白名单还不支持该操作：" + method;
             };
         } catch (RuntimeException ex) {
@@ -388,52 +410,61 @@ public class ChatServiceImpl implements ChatService {
     }
 
     private List<StoryOutlineOptionResponse> dispatchOutlineOptionList(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.OUTLINE_CONFIG_MANAGE);
         return storyOutlineOptionService.listOptions(argString(args, "type"), argBoolean(args, "enabled"));
     }
 
     private StoryOutlineOptionResponse dispatchOutlineOptionCreate(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.OUTLINE_CONFIG_MANAGE);
         return storyOutlineOptionService.createOption(toStoryOutlineOptionRequest(args));
     }
 
     private StoryOutlineOptionResponse dispatchOutlineOptionUpdate(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.OUTLINE_CONFIG_MANAGE);
         return storyOutlineOptionService.updateOption(requireLongArg(args, "id"), toStoryOutlineOptionRequest(args));
     }
 
     private String dispatchOutlineOptionDelete(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.OUTLINE_CONFIG_MANAGE);
         Long id = requireLongArg(args, "id");
         storyOutlineOptionService.deleteOption(id);
         return "已删除大纲配置，ID：" + id;
     }
 
     private List<AiPromptResponse> dispatchPromptList(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.PROMPT_MANAGE);
         return aiPromptService.listPrompts(argString(args, "category"), argBoolean(args, "enabled"), argString(args, "keyword"));
     }
 
     private AiPromptResponse dispatchPromptDetail(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.PROMPT_MANAGE);
         return aiPromptService.getPrompt(requireLongArg(args, "id"));
     }
 
     private AiPromptResponse dispatchPromptCreate(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.PROMPT_MANAGE);
         return aiPromptService.createPrompt(objectMapper.convertValue(args, AiPromptRequest.class));
     }
 
     private AiPromptResponse dispatchPromptUpdate(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.PROMPT_MANAGE);
         return aiPromptService.updatePrompt(requireLongArg(args, "id"), objectMapper.convertValue(args, AiPromptRequest.class));
     }
 
     private String dispatchPromptDelete(Long userId, Map<String, Object> args) {
-        permissionService.requireAdminOrRoot(userId);
+        permissionService.requireFeature(userId, FeaturePermissionKeys.PROMPT_MANAGE);
         Long id = requireLongArg(args, "id");
         aiPromptService.deletePrompt(id);
         return "已删除 Prompt，ID：" + id;
+    }
+
+    private FeaturePermissionResponse dispatchFeaturePermissionUpdate(Long userId, Map<String, Object> args) {
+        FeaturePermissionRequest request = toFeaturePermissionRequest(args);
+        Long id = argLong(args, "id");
+        if (id != null) {
+            return featurePermissionService.updatePermission(userId, id, request);
+        }
+        return featurePermissionService.updatePermissionByFeatureKey(userId, requireStringArg(args, "featureKey"), request);
     }
 
     private StoryGenerateRequest toStoryGenerateRequest(Map<String, Object> args) {
@@ -456,6 +487,46 @@ public class ChatServiceImpl implements ChatService {
                 argInteger(args, "sortOrder", 0),
                 argBoolean(args, "enabled")
         );
+    }
+
+    private FeaturePermissionRequest toFeaturePermissionRequest(Map<String, Object> args) {
+        FeaturePermissionRequest request = new FeaturePermissionRequest();
+        request.setAllowedRoles(parseAllowedRoles(args.get("allowedRoles")));
+        request.setEnabled(argBoolean(args, "enabled"));
+        return request;
+    }
+
+    private List<String> parseAllowedRoles(Object rawRoles) {
+        List<String> roles = new ArrayList<>();
+        if (rawRoles instanceof List<?> roleList) {
+            roleList.stream()
+                    .map(role -> role == null ? null : String.valueOf(role).trim())
+                    .map(this::normalizeRoleArg)
+                    .filter(StringUtils::isNotBlank)
+                    .forEach(roles::add);
+        } else if (rawRoles instanceof String text && StringUtils.isNotBlank(text)) {
+            for (String role : text.split("[,，、\\s]+")) {
+                if (StringUtils.isNotBlank(role)) {
+                    roles.add(normalizeRoleArg(role.trim()));
+                }
+            }
+        }
+        if (roles.isEmpty()) {
+            throw new IllegalArgumentException("缺少参数：allowedRoles");
+        }
+        return roles;
+    }
+
+    private String normalizeRoleArg(String role) {
+        if (StringUtils.isBlank(role)) {
+            return role;
+        }
+        return switch (role.trim().toUpperCase()) {
+            case "ROOT", "超级管理员" -> "ROOT";
+            case "ADMIN", "管理员" -> "ADMIN";
+            case "USER", "普通用户", "用户" -> "USER";
+            default -> role.trim();
+        };
     }
 
     private String formatStoryPage(Page<StoryResponse> page) {
@@ -519,6 +590,25 @@ public class ChatServiceImpl implements ChatService {
 
     private String formatUser(UserManageResponse user) {
         return "用户：" + user.getId() + " - " + user.getUsername() + "，权限：" + user.getRole();
+    }
+
+    private String formatFeaturePermissions(List<FeaturePermissionResponse> permissions) {
+        if (permissions.isEmpty()) {
+            return "没有查询到功能权限配置。";
+        }
+        return String.join("\n", permissions.stream()
+                .map(permission -> permission.getId() + " - " + permission.getFeatureKey()
+                        + " - " + permission.getFeatureName()
+                        + "，allowedRoles=" + String.join(",", permission.getAllowedRoles())
+                        + "，enabled=" + permission.getEnabled())
+                .toList());
+    }
+
+    private String formatFeaturePermission(FeaturePermissionResponse permission) {
+        return "功能权限：" + permission.getId() + " - " + permission.getFeatureKey()
+                + " - " + permission.getFeatureName()
+                + "，allowedRoles=" + String.join(",", permission.getAllowedRoles())
+                + "，enabled=" + permission.getEnabled();
     }
 
     private Long requireLongArg(Map<String, Object> args, String key) {

@@ -12,9 +12,10 @@
       <nav class="nav-links" aria-label="主导航">
         <RouterLink to="/chat">对话</RouterLink>
         <RouterLink to="/stories">漫剧列表</RouterLink>
-        <RouterLink v-if="canManageSystemConfig" to="/outline-options">大纲配置</RouterLink>
-        <RouterLink v-if="canManageSystemConfig" to="/prompts">Prompt 管理</RouterLink>
+        <RouterLink v-if="canManageOutlineConfig" to="/outline-options">大纲配置</RouterLink>
+        <RouterLink v-if="canManagePrompt" to="/prompts">Prompt 管理</RouterLink>
         <RouterLink v-if="userStore.isRoot" to="/users">用户权限</RouterLink>
+        <RouterLink v-if="userStore.isRoot" to="/feature-permissions">功能权限</RouterLink>
       </nav>
 
       <el-dropdown trigger="click" @command="handleUserCommand">
@@ -41,15 +42,22 @@
 <script setup lang="ts">
 import { computed, onMounted } from 'vue';
 import { useRouter } from 'vue-router';
+import { useFeaturePermissionStore } from '../../stores/featurePermissionStore';
 import { useUserStore } from '../../stores/userStore';
 
 const router = useRouter();
 const userStore = useUserStore();
+const featurePermissionStore = useFeaturePermissionStore();
 
 const username = computed(() => userStore.userInfo?.username || '创作者');
 
 const usernameInitial = computed(() => username.value.slice(0, 1).toUpperCase());
-const canManageSystemConfig = computed(() => userStore.canManageSystemConfig);
+const canManageOutlineConfig = computed(() =>
+  featurePermissionStore.hasFeature('outlineConfig.manage', userStore.canManageSystemConfig),
+);
+const canManagePrompt = computed(() =>
+  featurePermissionStore.hasFeature('prompt.manage', userStore.canManageSystemConfig),
+);
 const roleLabel = computed(() => {
   if (userStore.role === 'ROOT') {
     return 'root';
@@ -64,6 +72,9 @@ onMounted(() => {
   userStore.fetchProfile().catch(() => {
     // 资料刷新失败时仍保留当前页面，由请求拦截器统一处理 401。
   });
+  featurePermissionStore.fetchMyPermissions().catch(() => {
+    // 功能权限加载失败时保留本地角色兜底，真正权限仍由后端拦截。
+  });
 });
 
 function handleUserCommand(command: string) {
@@ -74,6 +85,7 @@ function handleUserCommand(command: string) {
 
   if (command === 'logout') {
     userStore.logout();
+    featurePermissionStore.resetMyPermissions();
     router.push('/login');
   }
 }

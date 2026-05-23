@@ -1,5 +1,6 @@
 package com.aisay.manga.controller;
 
+import com.aisay.manga.config.FeaturePermissionKeys;
 import com.aisay.manga.dto.request.StoryOutlineOptionRequest;
 import com.aisay.manga.dto.response.ApiResponse;
 import com.aisay.manga.dto.response.StoryOutlineOptionResponse;
@@ -47,7 +48,7 @@ public class StoryOutlineOptionController {
      */
     @PostMapping
     public ApiResponse<StoryOutlineOptionResponse> createOption(@Valid @RequestBody StoryOutlineOptionRequest request) {
-        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
+        permissionService.requireFeature(SecurityUtils.getCurrentUserId(), FeaturePermissionKeys.OUTLINE_CONFIG_MANAGE);
         return ApiResponse.success("配置项已创建", storyOutlineOptionService.createOption(request));
     }
 
@@ -60,7 +61,7 @@ public class StoryOutlineOptionController {
             @PathVariable Long id,
             @Valid @RequestBody StoryOutlineOptionRequest request
     ) {
-        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
+        permissionService.requireFeature(SecurityUtils.getCurrentUserId(), FeaturePermissionKeys.OUTLINE_CONFIG_MANAGE);
         return ApiResponse.success("配置项已更新", storyOutlineOptionService.updateOption(id, request));
     }
 
@@ -70,7 +71,7 @@ public class StoryOutlineOptionController {
      */
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deleteOption(@PathVariable Long id) {
-        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
+        permissionService.requireFeature(SecurityUtils.getCurrentUserId(), FeaturePermissionKeys.OUTLINE_CONFIG_MANAGE);
         storyOutlineOptionService.deleteOption(id);
         return ApiResponse.success("配置项已删除", null);
     }

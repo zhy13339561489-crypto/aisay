@@ -221,7 +221,7 @@ def is_blank(value: Any) -> bool:
     Returns:
         bool: 为空返回 True。
     """
-    return value is None or (isinstance(value, str) and not value.strip())
+    return value is None or (isinstance(value, str) and not value.strip()) or (isinstance(value, list) and not value)
 
 
 # ── 系统工具 ──────────────────────────────────────────────────────────
@@ -466,6 +466,84 @@ def user_permission_tools() -> list[Tool]:
     ]
 
 
+def feature_permission_update(raw_input: str) -> str:
+    """构造功能权限更新动作。
+
+    调用方：feature_permission_tools。
+    """
+    data = parse_tool_input(raw_input)
+    normalized = normalize_args(
+        data,
+        {
+            "key": "featureKey",
+            "permissionKey": "featureKey",
+            "featureId": "id",
+            "roles": "allowedRoles",
+            "roleList": "allowedRoles",
+        },
+    )
+
+    missing = []
+    if is_blank(normalized.get("id")) and is_blank(normalized.get("featureKey")):
+        missing.append("featureKey or id")
+    if is_blank(normalized.get("allowedRoles")):
+        missing.append("allowedRoles")
+
+    if missing:
+        return to_json({
+            "javaMethod": "story.none",
+            "javaMethodArgs": {},
+            "assistantMessage": "执行功能权限修改还缺少：" + "、".join(missing) + "。请补充后我会继续。",
+            "missingInfo": missing,
+        })
+
+    args = {
+        field: normalized.get(field)
+        for field in ["id", "featureKey", "allowedRoles", "enabled"]
+        if normalized.get(field) is not None
+    }
+    return to_json({
+        "javaMethod": "featurePermission.update",
+        "javaMethodArgs": args,
+        "assistantMessage": "我已经准备好修改功能权限配置。",
+        "missingInfo": [],
+    })
+
+
+def feature_permission_tools() -> list[Tool]:
+    """获取功能权限管理模块工具列表。
+
+    包含功能权限列表查询和按功能 key/id 修改允许角色。
+
+    Returns:
+        list[Tool]: 功能权限管理工具列表。
+    """
+    feature_key_hint = (
+        "Common featureKey values: chat.use, story.list, story.detail, story.generate, "
+        "story.updateBasic, story.updateDetail, story.reviseOutline, "
+        "story.generateVolumeOutline, story.reviseVolumeOutline, story.updateVolumeOutline, "
+        "story.generateVolumeSections, story.generateSectionAssets, story.generateSectionScript, "
+        "story.uploadAssetAudio, story.delete, outlineConfig.manage, prompt.manage, "
+        "user.manage, featurePermission.manage."
+    )
+    return system_tools() + [
+        make_action_tool(
+            "feature_permission_list",
+            "List all feature permission configs. Input JSON can be empty.",
+            "featurePermission.list",
+        ),
+        Tool.from_function(
+            name="feature_permission_update",
+            description=(
+                "Update allowed roles/enabled for a feature permission. "
+                "Input JSON: featureKey or id required; allowedRoles required as array/string "
+                "of ROOT/ADMIN/USER; enabled optional. " + feature_key_hint
+            ),
+            func=feature_permission_update,
+        ),
+    ]
+
+
 # ── 模块工具工厂映射 ──────────────────────────────────────────────────
 
 # 模块名 → 工具工厂函数的映射表
@@ -474,6 +552,7 @@ MODULE_TOOL_FACTORY: dict[str, Callable[[], list[Tool]]] = {
     "outline_config": outline_config_tools,      # 大纲配置模块
     "prompt_management": prompt_management_tools, # Prompt 管理模块
     "user_permission": user_permission_tools,    # 用户权限模块
+    "feature_permission": feature_permission_tools, # 功能权限模块
 }
 
 

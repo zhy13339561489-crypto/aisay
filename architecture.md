@@ -1431,3 +1431,34 @@ sequenceDiagram
 - 如果重试后仍然缺失 `novel_name`、`story_summary`、`outline` 或 `main_characters`，Python 会生成一个带有“临时降级大纲”标记的合法结果，保证 Java 后端能够正常落库和刷新前端列表。
 
 这层容错只处理剧情大纲生成的输出结构异常，不吞掉网络中断、数据库不可用、Prompt 变量缺失等其他真实故障。临时降级大纲是最后兜底方案，目的是避免异步任务因为偶发结构化输出问题完全失败；如果频繁出现，应优先检查 Prompt 管理中特定题材/风格的 Prompt 是否要求输出了错误字段。
+
+### 功能权限管理
+
+功能权限管理在用户角色之上增加一层“操作级授权”。角色仍然只有 `ROOT`、`ADMIN`、`USER` 三档，但每个具体功能操作会在 `feature_permissions` 表中维护允许角色，例如 `story.generate` 控制剧情大纲生成，`prompt.manage` 控制 Prompt 管理，`outlineConfig.manage` 控制大纲配置管理。
+
+后端统一通过 `PermissionService#requireFeature(userId, featureKey)` 校验功能权限。root 始终拥有全部功能权限，避免误配置导致系统无人可管理；如果 `feature_permissions` 表尚未创建或临时不可用，后端会按旧规则兜底，保证系统不会因为权限表缺失而完全不可用。
+
+主要功能 key 如下：
+- `chat.use`：创建/查看/发送/删除对话。
+- `story.generate`：生成剧情大纲并创建漫剧。
+- `story.reviseOutline`：自动修改剧情大纲。
+- `story.generateVolumeOutline`：生成分卷大纲。
+- `story.generateVolumeSections`：生成小节故事。
+- `story.generateSectionAssets`：生成人物/场景图片资产。
+- `story.generateSectionScript`：生成故事脚本。
+- `outlineConfig.manage`：管理题材和漫剧风格配置。
+- `prompt.manage`：管理默认 Prompt 和特定 Prompt。
+- `featurePermission.manage`：管理功能权限配置。
+
+前端通过 `/api/feature-permissions/me` 获取当前用户可见功能入口，用于隐藏大纲配置、Prompt 管理等导航。真正的安全边界仍在后端服务层，即使前端入口被绕过，未授权请求也会被 `requireFeature` 拦截。
+
+#### 对话系统中的功能权限管理
+
+智能对话系统现在把功能权限管理作为独立子链路 `feature_permission` 处理。Python 路由器负责识别“查询功能权限”“把某个功能开放给哪些角色”等意图，ReAct Agent 再选择 `feature_permission_list` 或 `feature_permission_update` Tool，最终只返回受控的 Java 方法名和参数。
+
+Java 后端仍是最终执行边界：`ChatServiceImpl` 只允许 `featurePermission.list` 和 `featurePermission.update` 两个白名单方法进入 `FeaturePermissionService`，并由服务层继续要求 root 权限。这样即使大模型误判、用户构造参数或 Prompt 被修改，也不能绕过 Java 侧权限校验。
+
+对话可操作的参数边界如下：
+- 查询：`featurePermission.list` 不需要额外参数，返回所有功能 key、名称、允许角色和启用状态。
+- 修改：`featurePermission.update` 支持用 `featureKey` 或 `id` 定位功能，`allowedRoles` 支持数组或字符串，`enabled` 可选；root 会被服务层自动保留，避免误配置导致无人可管理。
+- Prompt：如果数据库中已存在旧版 `chat_router`，需要同步更新 `20260523_create_intelligent_chat_prompts.sql` 或在 Prompt 管理中手动加入 `feature_permission` 模块说明，否则大模型可能仍按旧路由理解。

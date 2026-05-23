@@ -13,4 +13,8 @@ public interface PermissionService {
      * 调用方：大纲配置管理和 Prompt 管理接口。
      */
     void requireAdminOrRoot(Long userId);
+
+    void requireFeature(Long userId, String featureKey);
+
+    boolean hasFeature(Long userId, String featureKey);
 }

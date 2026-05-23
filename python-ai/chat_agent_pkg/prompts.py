@@ -49,7 +49,8 @@ prompt_ChatRouter = """
 2. outline_config：大纲配置子链路。包含题材和漫剧风格配置的列表、新增、修改、删除。需要 ADMIN 或 ROOT。
 3. prompt_management：Prompt 管理子链路。包含 Prompt 列表、详情、新增、修改、删除、默认/特定 Prompt 配置。需要 ADMIN 或 ROOT。
 4. user_permission：用户权限子链路。包含用户列表和权限等级修改。需要 ROOT。
-5. general：普通创作问答或闲聊，不执行 Java 后端操作。
+5. feature_permission：功能权限管理子链路。包含功能权限列表查询、按 featureKey 或 id 修改允许角色和启停状态。需要 ROOT。
+6. general：普通创作问答或闲聊，不执行 Java 后端操作。
 
 长期记忆：
 {LongTermMemory}
@@ -62,8 +63,8 @@ prompt_ChatRouter = """
 
 路由要求：
 1. 提取 intent，使用清晰短语，例如 story_generate、prompt_update、user_role_update。
-2. 提取 importantInfo，必须包含本次输入出现的关键真实信息，例如 storyId、storyTitle、genre、style、plot、promptKey、targetUserId、role、optionType、optionName。
-3. 判断 requiredPermission：普通创作和漫剧模块为 USER，大纲配置和 Prompt 管理为 ADMIN，用户权限为 ROOT。
+2. 提取 importantInfo，必须包含本次输入出现的关键真实信息，例如 storyId、storyTitle、genre、style、plot、promptKey、targetUserId、role、optionType、optionName、featureKey、allowedRoles、enabled。
+3. 判断 requiredPermission：普通创作和漫剧模块为 USER，大纲配置和 Prompt 管理为 ADMIN，用户权限和功能权限管理为 ROOT。
 4. 如果信息不足以执行，missingInfo 写明缺少哪些字段，并让 assistantMessage 询问这些信息。
 5. 如果是 general，只需要给出自然友好的 assistantMessage，route 使用 no_action。
 6. 使用 with_structured_output 输出 module、intent、route、requiredPermission、importantInfo、missingInfo、assistantMessage。

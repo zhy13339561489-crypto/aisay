@@ -69,6 +69,14 @@ const routes: RouteRecordRaw[] = [
         },
       },
       {
+        path: 'feature-permissions',
+        name: 'feature-permissions',
+        component: () => import('../views/FeaturePermissionManageView.vue'),
+        meta: {
+          rootOnly: true,
+        },
+      },
+      {
         path: 'story/:id',
         name: 'story-detail',
         component: () => import('../views/StoryDetailView.vue'),

@@ -67,8 +67,8 @@ def module_required_role(module: str | None) -> str:
     # 归一化模块名
     module_name = (module or "general").strip().lower()
 
-    # 用户权限模块需要 ROOT
-    if module_name == "user_permission":
+    # 用户权限和功能权限模块需要 ROOT
+    if module_name in {"user_permission", "feature_permission"}:
         return "ROOT"
 
     # 大纲配置和 Prompt 管理需要 ADMIN

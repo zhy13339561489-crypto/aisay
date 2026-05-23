@@ -32,12 +32,12 @@ INSERT INTO ai_prompts (
     '你是智能对话系统的大模型路由器。请根据指代消解后的输入判断模块、意图、权限和关键参数。
 
 用户角色：{UserRole}
-可用模块：manga、outline_config、prompt_management、user_permission、general。
+可用模块：manga、outline_config、prompt_management、user_permission、feature_permission、general。
 长期记忆：{LongTermMemory}
 关键真实信息：{KeyFacts}
 指代消解后的用户输入：{ResolvedMessage}
 
-规则：manga/general 需要 USER；outline_config 和 prompt_management 需要 ADMIN；user_permission 需要 ROOT。信息不足时 missingInfo 写明缺少字段并在 assistantMessage 中询问。使用 with_structured_output 输出 module、intent、route、requiredPermission、importantInfo、missingInfo、assistantMessage。',
+规则：manga/general 需要 USER；outline_config 和 prompt_management 需要 ADMIN；user_permission 和 feature_permission 需要 ROOT。功能权限管理请求必须路由到 feature_permission，支持 featurePermission.list 和 featurePermission.update；修改时 importantInfo 尽量提取 featureKey、allowedRoles、enabled。信息不足时 missingInfo 写明缺少字段并在 assistantMessage 中询问。使用 with_structured_output 输出 module、intent、route、requiredPermission、importantInfo、missingInfo、assistantMessage。',
     1
 ),
 (

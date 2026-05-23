@@ -231,7 +231,16 @@ async function syncRouteSession(rawSessionId?: string) {
   }
 
   if (chatStore.currentSessionId !== sessionId) {
-    await chatStore.switchSession(sessionId);
+    try {
+      await chatStore.switchSession(sessionId);
+    } catch (error) {
+      if (isSessionNotFoundError(error)) {
+        await chatStore.loadSessions();
+        router.replace('/chat');
+        return;
+      }
+      throw error;
+    }
     await scrollToBottom();
   }
 }
@@ -369,6 +378,9 @@ function getErrorMessage(error: unknown) {
   }
 
   return '聊天页加载失败，请确认后端服务已启动且登录状态有效';
+}
+function isSessionNotFoundError(error: unknown) {
+  return getErrorMessage(error).includes('Session not found');
 }
 </script>
 

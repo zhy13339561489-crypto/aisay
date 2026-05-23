@@ -1,5 +1,6 @@
 package com.aisay.manga.controller;
 
+import com.aisay.manga.config.FeaturePermissionKeys;
 import com.aisay.manga.dto.request.AiPromptRequest;
 import com.aisay.manga.dto.response.AiPromptResponse;
 import com.aisay.manga.dto.response.ApiResponse;
@@ -39,7 +40,7 @@ public class AiPromptController {
             @RequestParam(required = false) Boolean enabled,
             @RequestParam(required = false) String keyword
     ) {
-        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
+        permissionService.requireFeature(SecurityUtils.getCurrentUserId(), FeaturePermissionKeys.PROMPT_MANAGE);
         return ApiResponse.success(aiPromptService.listPrompts(category, enabled, keyword));
     }
 
@@ -49,7 +50,7 @@ public class AiPromptController {
      */
     @GetMapping("/{id}")
     public ApiResponse<AiPromptResponse> getPrompt(@PathVariable Long id) {
-        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
+        permissionService.requireFeature(SecurityUtils.getCurrentUserId(), FeaturePermissionKeys.PROMPT_MANAGE);
         return ApiResponse.success(aiPromptService.getPrompt(id));
     }
 
@@ -59,7 +60,7 @@ public class AiPromptController {
      */
     @PostMapping
     public ApiResponse<AiPromptResponse> createPrompt(@Valid @RequestBody AiPromptRequest request) {
-        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
+        permissionService.requireFeature(SecurityUtils.getCurrentUserId(), FeaturePermissionKeys.PROMPT_MANAGE);
         return ApiResponse.success("Prompt 已创建", aiPromptService.createPrompt(request));
     }
 
@@ -72,7 +73,7 @@ public class AiPromptController {
             @PathVariable Long id,
             @Valid @RequestBody AiPromptRequest request
     ) {
-        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
+        permissionService.requireFeature(SecurityUtils.getCurrentUserId(), FeaturePermissionKeys.PROMPT_MANAGE);
         return ApiResponse.success("Prompt 已更新", aiPromptService.updatePrompt(id, request));
     }
 
@@ -82,7 +83,7 @@ public class AiPromptController {
      */
     @DeleteMapping("/{id}")
     public ApiResponse<Void> deletePrompt(@PathVariable Long id) {
-        permissionService.requireAdminOrRoot(SecurityUtils.getCurrentUserId());
+        permissionService.requireFeature(SecurityUtils.getCurrentUserId(), FeaturePermissionKeys.PROMPT_MANAGE);
         aiPromptService.deletePrompt(id);
         return ApiResponse.success("Prompt 已删除", null);
     }
