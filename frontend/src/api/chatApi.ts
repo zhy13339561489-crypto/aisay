@@ -2,6 +2,8 @@ import request from './index';
 import type { ApiResponse } from '../types/auth';
 import type { ChatSessionResponse, ChatStartRequest, MessageResponse } from '../types/chat';
 
+const CHAT_MESSAGE_TIMEOUT = 0;
+
 function unwrap<T>(response: ApiResponse<T>): T {
   return response.data;
 }
@@ -12,7 +14,14 @@ export async function startSession(data: ChatStartRequest) {
 }
 
 export async function sendMessage(sessionId: number, content: string) {
-  const response = await request.post<ApiResponse<MessageResponse>>('/api/chat/message', { sessionId, content });
+  const response = await request.post<ApiResponse<MessageResponse>>(
+    '/api/chat/message',
+    { sessionId, content },
+    {
+      // Chat replies may wait for a slow LLM call; keep the HTTP request open until the backend responds.
+      timeout: CHAT_MESSAGE_TIMEOUT,
+    },
+  );
   return unwrap(response.data);
 }
 
