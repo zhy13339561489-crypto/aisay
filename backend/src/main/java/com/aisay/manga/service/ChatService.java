@@ -10,7 +10,7 @@ import java.util.List;
 public interface ChatService {
 
     /**
-     * 作用：创建绑定漫剧的聊天会话。
+     * 作用：创建不绑定具体漫剧的聊天会话。
      * 调用方：ChatController#startSession。
      */
     ChatSessionResponse startSession(Long userId, ChatStartRequest request);

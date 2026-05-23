@@ -109,6 +109,14 @@ streaming_text_llm_base = ChatTongyi(
     streaming=True,          # 流式输出，控制台实时打印 token
 )
 
+# 路由LLM
+Router = ChatTongyi(
+    model="qwen3.6-flash",   # 通义千问最强大的模型
+    temperature=0,           # 温度为 0，输出最确定性
+    top_p=0.2,               # 核采样概率，限制为最可能的 20% token
+    streaming=False,         # 非流式，用于结构化输出
+)
+
 
 def get_doubao_image_client():
     """懒加载豆包图片生成客户端。

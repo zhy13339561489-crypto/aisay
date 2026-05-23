@@ -1326,3 +1326,29 @@ flowchart LR
 - `AppLayout`：按角色显示导航入口，没有权限的管理入口不展示。
 - `router`：为 `/outline-options`、`/prompts`、`/users` 添加路由守卫，避免直接输入 URL 进入无权限页面。
 - `UserManageView`：root 专用页面，用于查看用户列表并设置其他用户为 `ROOT`、`ADMIN` 或 `USER`。
+
+### 对话系统与漫剧解耦
+
+对话系统现在是通用创作对话，不再绑定某一部具体漫剧。`chat_sessions.story_id` 保留为可空字段，用于兼容历史数据和未来可能的显式工具调用，但新建对话时 Java 后端会写入 `NULL`。
+
+```mermaid
+sequenceDiagram
+    participant View as ChatView
+    participant Java as ChatService
+    participant Python as chat_ai
+    participant DB as chat_sessions/messages
+
+    View->>Java: POST /api/chat/start {title?}
+    Java->>DB: 新建会话 story_id=NULL
+    View->>Java: POST /api/chat/message
+    Java->>DB: 保存用户消息
+    Java->>Python: ChatAgentRequest(storyId=null, story context empty)
+    Python-->>Java: ChatAgentResponse(javaMethod=story.none)
+    Java->>DB: 保存 AI 回复
+```
+
+当前边界如下：
+- 对话可以讨论创意、题材、人物、世界观、剧情方向和 Prompt 写法。
+- 生成剧情大纲仍是独立入口，生成结果会创建/更新漫剧列表中的故事记录，但不要求当前对话绑定该故事。
+- 对话 Agent 不会直接修改某个 Story；即使旧 Prompt 返回 `story.updateOutline`，Java 也会在没有目标 Story 时忽略该工具调用。
+- 如果后续要在对话里修改某部漫剧，应设计“显式选择目标漫剧”或“消息内指定 storyId”的工具调用，而不是恢复会话级强绑定。

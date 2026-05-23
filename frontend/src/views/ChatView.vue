@@ -16,7 +16,7 @@
           <p class="eyebrow">Chat Studio</p>
           <h1>{{ chatStore.currentSession?.title || 'AI 漫剧对话' }}</h1>
           <p class="bound-story">
-            {{ boundStoryId ? `已绑定漫剧 #${boundStoryId}` : '新建对话时请选择要绑定的漫剧' }}
+            对话不绑定具体漫剧；生成的大纲会单独保存到漫剧列表。
           </p>
         </div>
         <div class="chat-actions">
@@ -27,14 +27,6 @@
             @click="handleGenerateStory"
           >
             生成剧情大纲
-          </el-button>
-          <el-button
-            v-if="boundStoryId"
-            type="success"
-            plain
-            @click="router.push(`/story/${boundStoryId}`)"
-          >
-            查看绑定漫剧
           </el-button>
           <el-tag :type="chatStore.isConnected ? 'success' : 'info'" effect="plain">
             {{ chatStore.isConnected ? 'WebSocket 已连接' : 'HTTP 模式' }}
@@ -67,9 +59,9 @@
         </template>
 
         <div v-else class="welcome-card">
-          <p>选择一部漫剧，开始对话。</p>
-          <h2>每个对话都会绑定一部漫剧</h2>
-          <span>生成剧情大纲会新建一部漫剧；进入对话前请选择一个已有漫剧进行绑定。</span>
+          <p>先开一场自由创作对话。</p>
+          <h2>对话不再绑定具体漫剧</h2>
+          <span>你可以在这里讨论想法，也可以直接生成剧情大纲；生成结果会进入漫剧列表。</span>
         </div>
       </div>
 
@@ -80,38 +72,15 @@
       />
     </section>
 
-    <el-dialog v-model="createDialogVisible" title="新建对话：选择绑定漫剧" width="560px">
+    <el-dialog v-model="createDialogVisible" title="新建对话" width="480px">
       <el-form label-position="top" :model="createForm">
-        <el-form-item label="绑定漫剧" required>
-          <el-select
-            v-model="createForm.storyId"
-            filterable
-            placeholder="请选择一个已有漫剧"
-            class="full-width"
-            :loading="storyStore.isLoading"
-          >
-            <el-option
-              v-for="story in storyStore.stories"
-              :key="story.id"
-              :label="story.title"
-              :value="story.id"
-            >
-              <span>{{ story.title }}</span>
-              <span class="story-option-meta">{{ story.genre || '未分类' }}</span>
-            </el-option>
-          </el-select>
-        </el-form-item>
         <el-form-item label="对话标题（可选）">
-          <el-input v-model.trim="createForm.title" maxlength="200" show-word-limit placeholder="默认使用漫剧标题" />
+          <el-input v-model.trim="createForm.title" maxlength="200" show-word-limit placeholder="例如：新故事灵感讨论" />
         </el-form-item>
       </el-form>
-      <el-empty
-        v-if="!storyStore.isLoading && storyStore.stories.length === 0"
-        description="暂无可绑定的漫剧，请先在漫剧列表创建或生成一个漫剧。"
-      />
       <template #footer>
         <el-button @click="createDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="isCreating" @click="submitCreateSession">创建并绑定</el-button>
+        <el-button type="primary" :loading="isCreating" @click="submitCreateSession">创建对话</el-button>
       </template>
     </el-dialog>
 
@@ -172,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus';
 import { useRouter } from 'vue-router';
 import MessageBubble from '../components/chat/MessageBubble.vue';
@@ -197,7 +166,6 @@ const createDialogVisible = ref(false);
 const outlineDialogVisible = ref(false);
 const outlineFormRef = ref<FormInstance>();
 const createForm = reactive({
-  storyId: undefined as number | undefined,
   title: '',
 });
 const outlineForm = reactive({
@@ -218,8 +186,6 @@ const outlineRules: FormRules<typeof outlineForm> = {
     { max: 5000, message: '大致剧情长度不能超过 5000 个字符', trigger: 'blur' },
   ],
 };
-const boundStoryId = computed(() => chatStore.currentSession?.storyId || null);
-
 onMounted(initializeChatPage);
 
 watch(
@@ -246,7 +212,6 @@ async function initializeChatPage() {
     await Promise.all([
       chatStore.loadSessions(),
       outlineOptionStore.fetchEnabledOptions(),
-      storyStore.fetchStories(1, 100),
     ]);
     await syncRouteSession(props.sessionId);
   } catch (error) {
@@ -272,23 +237,15 @@ async function syncRouteSession(rawSessionId?: string) {
 }
 
 async function openCreateSessionDialog() {
-  createForm.storyId = undefined;
   createForm.title = '';
   createDialogVisible.value = true;
-  await storyStore.fetchStories(1, 100);
 }
 
 async function submitCreateSession() {
-  if (!createForm.storyId) {
-    ElMessage.warning('请选择要绑定的漫剧');
-    return;
-  }
-
   isCreating.value = true;
   pageError.value = '';
   try {
     const session = await chatStore.startNewSession({
-      storyId: createForm.storyId,
       title: createForm.title || undefined,
     });
     createDialogVisible.value = false;
@@ -309,7 +266,7 @@ function handleSelectSession(sessionId: number) {
 
 async function handleDeleteSession(sessionId: number) {
   try {
-    await ElMessageBox.confirm('删除后该对话会从列表中移除，绑定漫剧不会被删除。确定继续吗？', '删除对话', {
+    await ElMessageBox.confirm('删除后该对话会从列表中移除，不会影响已经生成的漫剧。确定继续吗？', '删除对话', {
       type: 'warning',
       confirmButtonText: '删除',
       cancelButtonText: '取消',
@@ -327,8 +284,8 @@ async function handleDeleteSession(sessionId: number) {
 }
 
 async function handleSendMessage(content: string) {
-  if (!chatStore.currentSessionId || !boundStoryId.value) {
-    ElMessage.warning('请先新建对话并选择绑定的漫剧');
+  if (!chatStore.currentSessionId) {
+    ElMessage.warning('请先新建对话');
     await openCreateSessionDialog();
     return;
   }
@@ -514,12 +471,6 @@ h1 {
 
 .full-width {
   width: 100%;
-}
-
-.story-option-meta {
-  float: right;
-  color: #94a3b8;
-  font-size: 12px;
 }
 
 .form-hint {

@@ -142,7 +142,7 @@ public class StoryController {
 
     /**
      * 作用：查询单个漫剧的详情，包括剧情大纲、角色设定和分卷大纲。
-     * 调用方：前端故事详情页、聊天页绑定故事信息刷新时请求 GET /api/story/{id}。
+     * 调用方：前端故事详情页请求 GET /api/story/{id}。
      */
     @GetMapping("/{id}")
     public ApiResponse<StoryDetailResponse> getStoryDetail(@PathVariable Long id) {

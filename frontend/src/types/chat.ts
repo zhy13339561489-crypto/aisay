@@ -17,7 +17,7 @@ export interface MessageResponse {
 }
 
 export interface ChatStartRequest {
-  storyId: number;
+  storyId?: number;
   title?: string;
 }
 

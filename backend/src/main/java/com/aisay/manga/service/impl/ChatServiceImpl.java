@@ -81,20 +81,19 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 作用：创建一个绑定到指定漫剧的聊天会话。
+     * 作用：创建一个不绑定具体漫剧的聊天会话。
      * 调用方：ChatController#startSession。
      */
     @Override
     @Transactional
     public ChatSessionResponse startSession(Long userId, ChatStartRequest request) {
-        Story story = getOwnedStory(request.getStoryId(), userId);
         LocalDateTime now = LocalDateTime.now();
 
         ChatSession session = new ChatSession();
         session.setUserId(userId);
-        session.setStoryId(story.getId());
+        session.setStoryId(null);
         session.setSessionKey(UUID.randomUUID().toString());
-        session.setTitle(resolveTitle(request, story));
+        session.setTitle(resolveTitle(request));
         session.setContextData(new HashMap<>());
         session.setCurrentStage(INITIAL_STAGE);
         session.setProgressPercentage(0);
@@ -149,14 +148,13 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 作用：保存用户消息，调用 Python Chat Agent，按 Agent 返回的 Java 方法更新绑定漫剧，再保存 AI 回复。
+     * 作用：保存用户消息，调用 Python Chat Agent，并保存 AI 回复。对话不再直接绑定或修改具体漫剧。
      * 调用方：ChatController#sendMessage。
      */
     @Override
     @Transactional
     public MessageResponse sendMessage(Long userId, SendMessageRequest request) {
         ChatSession session = getOwnedActiveSession(request.getSessionId(), userId);
-        Story story = getBoundStory(session, userId);
         LocalDateTime now = LocalDateTime.now();
 
         Message userMessage = new Message();
@@ -167,7 +165,7 @@ public class ChatServiceImpl implements ChatService {
         userMessage.setCreatedAt(now);
         messageMapper.insert(userMessage);
 
-        String assistantContent = runAgentAndDispatch(userId, session, story, request.getContent());
+        String assistantContent = runAgentAndDispatch(userId, session, request.getContent());
         Message aiMessage = createAiMessage(session.getId(), assistantContent);
         messageMapper.insert(aiMessage);
 
@@ -178,26 +176,26 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 作用：把当前会话、绑定漫剧和用户消息发给 Python Agent，并执行 Agent 返回的白名单 Java 方法。
+     * 作用：把当前会话和用户消息发给 Python Agent；当前对话无绑定漫剧，因此不会执行故事修改方法。
      * 调用方：sendMessage。
      */
-    private String runAgentAndDispatch(Long userId, ChatSession session, Story story, String userMessage) {
+    private String runAgentAndDispatch(Long userId, ChatSession session, String userMessage) {
         try {
             ChatAgentResponse response = aiEngineClient.runChatAgent(new ChatAgentRequest(
                     userId,
                     session.getId(),
-                    story.getId(),
-                    story.getTitle(),
-                    story.getGenre(),
-                    story.getStyle(),
-                    story.getSynopsis(),
-                    story.getFullContent(),
+                    null,
+                    session.getTitle(),
+                    null,
+                    null,
+                    null,
+                    null,
                     userMessage
             ));
-            dispatchJavaMethod(story, response);
+            dispatchJavaMethod(null, response);
             return resolveText(response.getAssistantMessage(), "已处理你的请求。");
         } catch (RuntimeException ex) {
-            return "Python 对话 Agent 暂时不可用，未能更新绑定漫剧《" + story.getTitle() + "》。请确认 FastAPI 服务运行后再试。";
+            return "Python 对话 Agent 暂时不可用，请确认 FastAPI 服务运行后再试。";
         }
     }
 
@@ -208,6 +206,9 @@ public class ChatServiceImpl implements ChatService {
     private void dispatchJavaMethod(Story story, ChatAgentResponse response) {
         String method = resolveText(response.getJavaMethod(), METHOD_NONE);
         if (METHOD_NONE.equals(method)) {
+            return;
+        }
+        if (story == null) {
             return;
         }
         if (METHOD_UPDATE_OUTLINE.equals(method)) {
@@ -305,19 +306,8 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 作用：读取会话绑定的漫剧，并校验漫剧归属当前用户。
-     * 调用方：sendMessage。
-     */
-    private Story getBoundStory(ChatSession session, Long userId) {
-        if (session.getStoryId() == null) {
-            throw new IllegalStateException("This session is not bound to a story. Please create a new session and select a story.");
-        }
-        return getOwnedStory(session.getStoryId(), userId);
-    }
-
-    /**
      * 作用：校验漫剧存在且属于当前用户。
-     * 调用方：startSession、getBoundStory。
+     * 调用方：保留给未来需要显式选择故事的工具调用使用。
      */
     private Story getOwnedStory(Long storyId, Long userId) {
         Story story = storyMapper.selectById(storyId);
@@ -331,12 +321,12 @@ public class ChatServiceImpl implements ChatService {
     }
 
     /**
-     * 作用：决定新会话标题，用户未填写时默认使用绑定漫剧标题。
+     * 作用：决定新会话标题，用户未填写时使用通用默认标题。
      * 调用方：startSession。
      */
-    private String resolveTitle(ChatStartRequest request, Story story) {
+    private String resolveTitle(ChatStartRequest request) {
         if (request == null || StringUtils.isBlank(request.getTitle())) {
-            return story.getTitle();
+            return "新对话";
         }
         return request.getTitle();
     }

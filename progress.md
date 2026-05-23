@@ -1757,3 +1757,26 @@
 - [ ] 如果 root 账号用户名不是 `root`，请执行类似 SQL：`UPDATE users SET role='ROOT' WHERE username='你的root用户名';`。
 - [ ] 重启 Java 后端和前端开发服务。
 - [ ] 用 root 登录后进入“用户权限”，为需要管理 Prompt/大纲配置的用户设置 `ADMIN`。
+
+## 2026-05-23 对话系统取消绑定漫剧
+### 后端
+- [x] `ChatStartRequest.storyId` 不再必填，创建对话时 Java 后端会把 `chat_sessions.story_id` 保存为 `NULL`。
+- [x] `ChatServiceImpl#sendMessage` 不再要求会话绑定 Story，也不再读取绑定漫剧上下文。
+- [x] 对话 Agent 请求仍保留可选故事字段以兼容旧结构，但当前新对话传入的 `storyId/title/genre/storyStyle/synopsis/outline` 均不指向具体漫剧。
+- [x] 如果旧 Prompt 或模型误返回 `story.updateOutline`，Java 会因为当前没有目标 Story 而忽略该工具调用，避免误改数据。
+
+### Python
+- [x] `chat_ai.ChatAgentRequest.story_id` 改为可选。
+- [x] 未绑定具体漫剧时，Python 会强制把非 `story.none` 的工具调用降级为 `story.none`。
+- [x] `prompt.py` 中的默认 `chat_agent` Prompt 已改为“通用对话，不绑定具体漫剧”。
+- [x] 新增 SQL 文件 `backend/src/main/resources/db/20260523_update_chat_agent_unbound_prompt.sql`，用于同步更新 MySQL 中的默认 `chat_agent` Prompt。
+
+### 前端
+- [x] 新建对话弹窗移除“绑定漫剧”下拉框，只保留可选对话标题。
+- [x] 聊天页提示语改为“对话不绑定具体漫剧”。
+- [x] 发送消息只要求当前存在会话，不再要求 `boundStoryId`。
+- [x] 删除对话提示改为“不影响已经生成的漫剧”。
+
+### 需要你做的事情
+- [ ] 执行 SQL 文件：`backend/src/main/resources/db/20260523_update_chat_agent_unbound_prompt.sql`，让数据库中的默认 `chat_agent` Prompt 同步为不绑定漫剧版本。
+- [ ] 重启 Java 后端、Python FastAPI 和前端开发服务。

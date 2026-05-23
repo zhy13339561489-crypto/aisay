@@ -29,7 +29,7 @@ class ChatAgentRequest(BaseModel):
     """对话 Agent 请求体。
 
     对应 Java 端 AiEngineClient.runChatAgent 的入参，
-    包含用户 ID、会话 ID、故事 ID、书名、摘要、大纲和用户消息。
+    包含用户 ID、会话 ID、可选故事上下文和用户消息。
     """
 
     # 用户 ID，用于标识当前操作的用户
@@ -38,11 +38,11 @@ class ChatAgentRequest(BaseModel):
     # 会话 ID，标识当前对话会话
     session_id: int = Field(alias="sessionId")
 
-    # 故事 ID，标识当前会话绑定的故事
-    story_id: int = Field(alias="storyId")
+    # 故事 ID。当前对话默认不绑定具体漫剧，因此通常为空。
+    story_id: int | None = Field(default=None, alias="storyId")
 
-    # 故事标题，用于 Agent 理解当前故事上下文
-    title: str
+    # 可选标题；未绑定漫剧时使用会话标题
+    title: str | None = None
 
     # 当前漫剧题材，用于匹配特定 Prompt
     genre: str | None = None
@@ -122,7 +122,7 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
     # 打印请求接收日志
     log_progress(
         trace_id,
-        f"request accepted, user_id={request.user_id}, session_id={request.session_id}, story_id={request.story_id}",
+        f"request accepted, user_id={request.user_id}, session_id={request.session_id}, story_id={request.story_id or 'none'}",
         started_at,
         scope,
     )
@@ -146,7 +146,7 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
     result = invoke_llm_with_retry(
         chain,
         {
-            "Title": request.title,                        # 故事标题
+            "Title": request.title or "未绑定具体漫剧的通用对话",  # 会话标题或故事标题
             "Theme": request.genre or "未指定",             # 当前题材
             "StoryStyle": request.story_style or "未指定",  # 当前漫剧风格
             "StorySummary": request.synopsis or "",        # 故事摘要
@@ -171,6 +171,12 @@ def run_chat_agent(request: ChatAgentRequest) -> ChatAgentResponse:
         result.java_method = "story.none"           # 降级为无操作
         result.java_method_args = {}                 # 清空参数
         result.assistant_message = "我理解了你的请求，但当前工具白名单还不支持这个操作。"
+
+    # 当前对话系统不绑定具体漫剧，没有明确目标故事时禁止返回故事修改方法。
+    if request.story_id is None and result.java_method != "story.none":
+        result.java_method = "story.none"
+        result.java_method_args = {}
+        result.assistant_message = "当前对话没有绑定具体漫剧，我可以先帮你梳理想法；需要落库时请到对应漫剧详情页操作。"
 
     # 构建并返回响应
     return ChatAgentResponse(

@@ -33,7 +33,7 @@ public class ChatController {
     }
 
     /**
-     * 作用：创建一个新的聊天会话，并要求会话绑定到一个用户拥有的漫剧。
+     * 作用：创建一个新的聊天会话；对话不再绑定到具体漫剧。
      * 调用方：前端创建对话弹窗提交后请求 POST /api/chat/start。
      */
     @PostMapping("/start")

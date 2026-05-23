@@ -61,7 +61,7 @@ export const useChatStore = defineStore('chat', () => {
 
     const sessionId = currentSessionId.value;
     if (!sessionId) {
-      throw new Error('请先新建对话并选择绑定的漫剧');
+      throw new Error('请先新建对话');
     }
 
     const userMessage = createOptimisticUserMessage(sessionId, trimmedContent);
